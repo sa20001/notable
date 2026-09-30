@@ -21,7 +21,9 @@ import com.ethran.notable.SCREEN_HEIGHT
 import com.ethran.notable.SCREEN_WIDTH
 import com.ethran.notable.data.CachedBackground
 import com.ethran.notable.data.PageDataManager
+import com.ethran.notable.data.datastore.A4_WIDTH
 import com.ethran.notable.data.datastore.GlobalAppSettings
+import com.ethran.notable.data.datastore.USE_A4_SHEET_MODE
 import com.ethran.notable.data.db.Image
 import com.ethran.notable.data.db.Stroke
 import com.ethran.notable.data.model.BackgroundType
@@ -45,6 +47,7 @@ import com.ethran.notable.gestures.ZOOM_SENSITIVITY
 import com.ethran.notable.gestures.ZOOM_SNAP_THRESHOLD
 import com.ethran.notable.ui.SnackConf
 import com.ethran.notable.ui.SnackState
+import com.ethran.notable.ui.convertPointsToPixel
 import com.ethran.notable.utils.onError
 import io.shipbook.shipbooksdk.ShipBook
 import kotlinx.coroutines.CoroutineScope
@@ -180,8 +183,8 @@ class PageView(
         coroutineScope.launch(Dispatchers.IO) {
             // set page, and retrieve page data from db
             pageDataManager.setPage(initialPageId)
-            log.i("PageView init with initial pageId: $initialPageId" )
-            if(currentPageId.isEmpty())
+            log.i("PageView init with initial pageId: $initialPageId")
+            if (currentPageId.isEmpty())
                 log.e("Current page id is empty")
 
             zoomLevel.value = pageDataManager.getPageZoom(currentPageId)
@@ -578,6 +581,50 @@ class PageView(
             deltaInPage = deltaInPage.copy(y = -scroll.y)
         }
 
+        if (USE_A4_SHEET_MODE) { // Block scrolling in x direction outside A4 bounds
+            val a4Width = convertPointsToPixel(A4_WIDTH.toFloat(), context)
+            val viewportWidth = viewWidth.toFloat()
+            val viewportHeight = viewHeight.toFloat()
+
+            /*
+            * Calculate the excess width of real A4 size compared to the viewport size,
+            * as reference we get the max value between width and height to avoid that the sheet has
+            * different x sizes based on the orientation of the screen.
+            * If excess is less than 2% match the sheet size to the viewport size.
+            * */
+            log.d("Viewport size: $viewportWidth x $viewportHeight")
+            val viewPortReference = max(viewportWidth, viewportHeight)
+            val excess = a4Width - viewPortReference
+            val tolerance = viewPortReference * 0.02f // 2%
+
+            val effectiveWidth =
+                if (excess > 0f && excess <= tolerance) {
+                    viewPortReference
+                } else {
+                    a4Width
+                }
+
+            val maxScrollX = max(0f, effectiveWidth - viewportWidth / zoomLevel.value)
+
+            log.d(
+                """
+                    A4 width: $a4Width
+                    View width: $viewportWidth
+                    Excess: $excess
+                    Tolerance: $tolerance
+                    Effective width: $effectiveWidth
+                    Max scroll X: $maxScrollX
+                    Zoom level: ${zoomLevel.value}
+                """.trimIndent()
+            )
+
+            if (scroll.x + deltaInPage.x > maxScrollX) {
+                deltaInPage = deltaInPage.copy(
+                    x = maxScrollX - scroll.x
+                )
+            }
+        }
+
         // There is nothing to do, return.
         if (deltaInPage == Offset.Zero) return
 
@@ -880,10 +927,21 @@ class PageView(
         )
     }
 
-
+    private var skipInitialScrollAdjustment = true
     fun updateDimensions(newWidth: Int, newHeight: Int) {
         if (newWidth != viewWidth || newHeight != viewHeight) {
-            log.d("Updating dimensions: $newWidth x $newHeight")
+            log.d("Updating dimensions from: $viewWidth x $viewHeight, to: $newWidth x $newHeight")
+
+            // Preserve the same visual position after rotation (landscape/portrait), adjusted for the new screen width.
+            if (skipInitialScrollAdjustment) { // Do not run the logic when opening the document
+                skipInitialScrollAdjustment = false
+            } else {
+                val scrollThreshold = newWidth - viewWidth
+                val residualScroll = scroll.x - scrollThreshold
+                log.v("scrollThreshold: $scrollThreshold, residualScroll: $residualScroll")
+                scroll = Offset(residualScroll, scroll.y)
+            }
+
             viewWidth = newWidth
             viewHeight = newHeight
             updateCanvasDimensions()
