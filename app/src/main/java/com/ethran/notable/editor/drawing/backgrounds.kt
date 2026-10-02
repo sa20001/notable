@@ -364,7 +364,8 @@ fun drawPaginationLine(
     if (pageMode == null || pageMode == PageMode.INFINITE) return
 
     val sheetHeightPixels = convertPointsToPixel(pageMode.height.toFloat(), context)
-    val sheetWidthPixels = convertPointsToPixel(pageMode.width.toFloat(), context)
+    val sheetWidthPixels = canvas.width.toFloat()
+    log.v("sheetHeightPixels: $sheetHeightPixels and sheetWidthPixels: $sheetWidthPixels")
 
     // Convert scroll position to canvas coordinates
     // Calculate current page number (1-based)
