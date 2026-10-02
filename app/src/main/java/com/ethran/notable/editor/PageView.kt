@@ -48,7 +48,6 @@ import com.ethran.notable.ui.SnackConf
 import com.ethran.notable.ui.SnackState
 import com.ethran.notable.ui.convertPointsToPixel
 import com.ethran.notable.utils.onError
-import com.onyx.android.sdk.extension.isNotNull
 import io.shipbook.shipbooksdk.ShipBook
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -583,7 +582,7 @@ class PageView(
 
         val pageMode = pageDataManager.getPageMode()
         log.v("Page mode: $pageMode")
-        if (pageMode.isNotNull() && pageMode != PageMode.INFINITE){
+        if (pageMode != null && pageMode != PageMode.INFINITE){
             // Block scrolling in x direction outside chosen sheet size bounds
 
             val sheetWidth = convertPointsToPixel(pageMode.width.toFloat(), context)
@@ -900,6 +899,7 @@ class PageView(
 
     fun drawBgToCanvas(clipRect: Rect?) {
         val backgroundType = pageDataManager.getBackgroundType() ?: BackgroundType.Native
+        val pageMode = pageDataManager.getPageMode()
         val bg = pageDataManager.getBackgroundName()
         val pageNumber = currentPageNumber
         val scale = zoomLevel.value
@@ -928,7 +928,8 @@ class PageView(
             scale = scale,
             repeat = false,
             clipRect = clipRect,
-            context = context
+            context = context,
+            pageMode = pageMode
         )
     }
 
