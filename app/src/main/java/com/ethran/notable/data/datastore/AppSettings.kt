@@ -82,7 +82,6 @@ data class AppSettings(
     // same SystemUI pipeline serves the side/bottom edge navigation swipes, so those
     // stop working inside the app while this is on — hence opt-in.
     val blockSystemGestures: Boolean = false,
-    val renameOnCreate: Boolean = true,
 
     // Debug
     val showWelcome: Boolean = true,
