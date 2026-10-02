@@ -582,7 +582,7 @@ class PageView(
 
         val pageMode = pageDataManager.getPageMode()
         log.v("Page mode: $pageMode")
-        if (pageMode != null && pageMode != PageMode.INFINITE){
+        if (pageMode != null && pageMode != PageMode.INFINITE) {
             // Block scrolling in x direction outside chosen sheet size bounds
 
             val sheetWidth = convertPointsToPixel(pageMode.width.toFloat(), context)
@@ -597,11 +597,11 @@ class PageView(
             * */
             log.d("Viewport size: $viewportWidth x $viewportHeight")
             val viewPortReference = max(viewportWidth, viewportHeight)
-            val excess = sheetWidth - viewPortReference
+            val difference = kotlin.math.abs(sheetWidth - viewPortReference)
             val tolerance = viewPortReference * 0.02f // 2%
 
             val effectiveWidth =
-                if (excess > 0f && excess <= tolerance) {
+                if (difference <= tolerance) {
                     viewPortReference
                 } else {
                     sheetWidth
@@ -613,7 +613,7 @@ class PageView(
                 """
                     Sheet width: $sheetWidth
                     View width: $viewportWidth
-                    Excess: $excess
+                    Difference: $difference
                     Tolerance: $tolerance
                     Effective width: $effectiveWidth
                     Max scroll X: $maxScrollX
