@@ -291,5 +291,12 @@
     <string name="toolbar_eraser">Eraser</string>
     <string name="details_notebook_buttons_cancel">Cancel</string>
     <string name="details_notebook_buttons_create">Create</string>
+    <string name="details_notebook_pageMode">Page mode</string>
+    <string name="page_mode_infinite">Infinite canvas</string>
+    <string name="page_mode_a4">A4</string>
+    <string name="page_mode_a5">A5</string>
+    <string name="page_mode_letter">Letter</string>
+    <string name="page_mode_legal">Legal</string>
+    <string name="default_page_mode">Default page mode</string>
 
 </resources>

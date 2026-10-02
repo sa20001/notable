@@ -21,9 +21,8 @@ import com.ethran.notable.SCREEN_HEIGHT
 import com.ethran.notable.SCREEN_WIDTH
 import com.ethran.notable.data.CachedBackground
 import com.ethran.notable.data.PageDataManager
-import com.ethran.notable.data.datastore.A4_WIDTH
 import com.ethran.notable.data.datastore.GlobalAppSettings
-import com.ethran.notable.data.datastore.USE_A4_SHEET_MODE
+import com.ethran.notable.data.datastore.PageMode
 import com.ethran.notable.data.db.Image
 import com.ethran.notable.data.db.Stroke
 import com.ethran.notable.data.model.BackgroundType
@@ -49,6 +48,7 @@ import com.ethran.notable.ui.SnackConf
 import com.ethran.notable.ui.SnackState
 import com.ethran.notable.ui.convertPointsToPixel
 import com.ethran.notable.utils.onError
+import com.onyx.android.sdk.extension.isNotNull
 import io.shipbook.shipbooksdk.ShipBook
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -174,7 +174,7 @@ class PageView(
     }
 
     fun getBackgroundPageNumber(): Int {
-        // There might be a bug here -- check it again.
+        // TODO There might be a bug here -- check it again.
         return currentBackground.pageNumber
     }
 
@@ -581,8 +581,12 @@ class PageView(
             deltaInPage = deltaInPage.copy(y = -scroll.y)
         }
 
-        if (USE_A4_SHEET_MODE) { // Block scrolling in x direction outside A4 bounds
-            val a4Width = convertPointsToPixel(A4_WIDTH.toFloat(), context)
+        val pageMode = pageDataManager.getPageMode()
+        log.v("Page mode: $pageMode")
+        if (pageMode.isNotNull() && pageMode != PageMode.INFINITE){
+            // Block scrolling in x direction outside chosen sheet size bounds
+
+            val sheetWidth = convertPointsToPixel(pageMode.width.toFloat(), context)
             val viewportWidth = viewWidth.toFloat()
             val viewportHeight = viewHeight.toFloat()
 
@@ -594,21 +598,21 @@ class PageView(
             * */
             log.d("Viewport size: $viewportWidth x $viewportHeight")
             val viewPortReference = max(viewportWidth, viewportHeight)
-            val excess = a4Width - viewPortReference
+            val excess = sheetWidth - viewPortReference
             val tolerance = viewPortReference * 0.02f // 2%
 
             val effectiveWidth =
                 if (excess > 0f && excess <= tolerance) {
                     viewPortReference
                 } else {
-                    a4Width
+                    sheetWidth
                 }
 
             val maxScrollX = max(0f, effectiveWidth - viewportWidth / zoomLevel.value)
 
             log.d(
                 """
-                    A4 width: $a4Width
+                    Sheet width: $sheetWidth
                     View width: $viewportWidth
                     Excess: $excess
                     Tolerance: $tolerance
