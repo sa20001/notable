@@ -35,6 +35,6 @@ fun convertDpToPixel(dp: Dp, context: Context): Float {
  * @param context The Android context used to obtain the display's DPI.
  * @return The equivalent value in pixels.
  */
-fun convertPointsToPixel(points: Float, context: Context): Float {
+fun convertPointsToPixel(points: Int, context: Context): Float {
     return points * context.resources.displayMetrics.xdpi / 72f
 }

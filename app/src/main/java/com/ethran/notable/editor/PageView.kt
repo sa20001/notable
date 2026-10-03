@@ -566,6 +566,37 @@ class PageView(
         return Rect(left, top, right, bottom)
     }
 
+    /**
+     * Calculates the sheet width adjusted to the viewport.
+     *
+     * If the sheet width is within the configured tolerance (2%) of the screen width,
+     * the screen width is used; otherwise, the converted sheet width is returned.
+     *
+     * @param screenWidth the current viewport width in pixels
+     * @param pageWidth the original sheet width in PDF points (1/72 inch)
+     * @return the adjusted sheet width
+     */
+    private fun sheetAdjustedWidth(screenWidth: Int, pageWidth: Int): Float {
+        val sheetTolerance = 0.02f // The max allowed deviation between screen width and sheet width
+        val sheetWidth = convertPointsToPixel(pageWidth, context)
+        val deviation = abs(sheetWidth - screenWidth)
+        val deviationThreshold = screenWidth * sheetTolerance
+        val sheetAdjustedWidth =
+            if (deviation <= deviationThreshold) screenWidth.toFloat() else sheetWidth
+
+        log.d(
+            """
+                    Sheet width: $sheetWidth
+                    View width: $screenWidth
+                    Deviation: $deviation
+                    Deviation threshold: $deviationThreshold
+                    Sheet adjusted width: $sheetAdjustedWidth
+                """.trimIndent()
+        )
+
+        return sheetAdjustedWidth
+    }
+
     suspend fun updateScroll(dragDelta: Offset) {
 //        log.d("Update scroll, dragDelta: $dragDelta, scroll: $scroll, zoomLevel.value: $zoomLevel.value")
         // drag delta is in screen coordinates,
@@ -585,45 +616,29 @@ class PageView(
         if (pageMode != null && pageMode != PageMode.INFINITE) {
             // Block scrolling in x direction outside chosen sheet size bounds
 
-            val sheetWidth = convertPointsToPixel(pageMode.width.toFloat(), context)
-            val viewportWidth = viewWidth.toFloat()
-            val viewportHeight = viewHeight.toFloat()
+            val viewportWidth = viewWidth
+            val viewportHeight = viewHeight
 
-            /*
-            * Calculate the excess width of real A4 size compared to the viewport size,
-            * as reference we get the max value between width and height to avoid that the sheet has
-            * different x sizes based on the orientation of the screen.
-            * If excess is less than 2% match the sheet size to the viewport size.
-            * */
             log.d("Viewport size: $viewportWidth x $viewportHeight")
             val viewPortReference = max(viewportWidth, viewportHeight)
-            val difference = kotlin.math.abs(sheetWidth - viewPortReference)
-            val tolerance = viewPortReference * 0.02f // 2%
-
-            val effectiveWidth =
-                if (difference <= tolerance) {
-                    viewPortReference
-                } else {
-                    sheetWidth
-                }
-
-            val maxScrollX = max(0f, effectiveWidth - viewportWidth / zoomLevel.value)
+            val sheetAdjustedWidth = sheetAdjustedWidth(
+                viewPortReference, pageMode.width
+            )
+            val adjustedViewportWidth = viewportWidth / zoomLevel.value
+            val scrollAvailable = sheetAdjustedWidth - adjustedViewportWidth
+            val scrollApplied = if (scrollAvailable >= 0) scrollAvailable else scrollAvailable / 2
 
             log.d(
                 """
-                    Sheet width: $sheetWidth
-                    View width: $viewportWidth
-                    Difference: $difference
-                    Tolerance: $tolerance
-                    Effective width: $effectiveWidth
-                    Max scroll X: $maxScrollX
+                    Scroll available : $scrollAvailable
+                    Scroll applied on X: $scrollApplied
                     Zoom level: ${zoomLevel.value}
                 """.trimIndent()
             )
 
-            if (scroll.x + deltaInPage.x > maxScrollX) {
+            if (scroll.x + deltaInPage.x > scrollApplied) {
                 deltaInPage = deltaInPage.copy(
-                    x = maxScrollX - scroll.x
+                    x = scrollApplied - scroll.x
                 )
             }
         }
@@ -933,20 +948,35 @@ class PageView(
         )
     }
 
-    private var skipInitialScrollAdjustment = true
     fun updateDimensions(newWidth: Int, newHeight: Int) {
         if (newWidth != viewWidth || newHeight != viewHeight) {
             log.d("Updating dimensions from: $viewWidth x $viewHeight, to: $newWidth x $newHeight")
 
-            // Preserve the same visual position after rotation (landscape/portrait), adjusted for the new screen width.
-            if (skipInitialScrollAdjustment) { // Do not run the logic when opening the document
-                skipInitialScrollAdjustment = false
-            } else {
-                val scrollThreshold = newWidth - viewWidth
-                val residualScroll = scroll.x - scrollThreshold
-                log.v("scrollThreshold: $scrollThreshold, residualScroll: $residualScroll")
-                scroll = Offset(residualScroll, scroll.y)
+            val pageMode = pageDataManager.getPageMode()
+            var residualScroll = scroll.x
+
+            // Handle case when not using infinite sheet mode
+            if (pageMode != null && pageMode != PageMode.INFINITE) {
+
+                val sheetAdjustedWidth = sheetAdjustedWidth(
+                    newWidth, pageMode.width
+                )
+
+
+                // TODO probably newWidth must be adjusted for zoom -> investigate
+                if (sheetAdjustedWidth < newWidth) { // If sheet smaller than screen width
+                    residualScroll = -(newWidth - sheetAdjustedWidth) / 2
+                } else if (sheetAdjustedWidth == newWidth.toFloat()) { // If equal to screen width
+                    residualScroll = 0f
+                } else { // If sheet bigger than screen width
+                    val maxScrollAvailable =
+                        max(0f, sheetAdjustedWidth - newWidth / zoomLevel.value)
+                    residualScroll = min(scroll.x, maxScrollAvailable)
+                }
             }
+
+            log.v("residualScroll: $residualScroll, redisidualZoom: ${zoomLevel.value}")
+            scroll = Offset(residualScroll, scroll.y)
 
             viewWidth = newWidth
             viewHeight = newHeight
