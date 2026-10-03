@@ -94,6 +94,8 @@ class PageView(
 
     private var loadingJob: Job? = null
 
+    private var pageMode: PageMode? = null
+
     @Volatile
     var windowedBitmap = createBitmap(viewWidth, viewHeight)
         private set
@@ -204,6 +206,7 @@ class PageView(
             loadPage()
             log.d("Page loaded (Init with id: $currentPageId)")
             pageDataManager.collectAndPersistBitmapsBatch(context, coroutineScope)
+            pageMode = pageDataManager.getPageMode()
         }
     }
 
@@ -233,6 +236,7 @@ class PageView(
             pageDataManager.onExit(oldId, windowedBitmap, coroutineScope)
             pageDataManager.setPage(newPageId)
             zoomLevel.value = pageDataManager.getPageZoom(currentPageId)
+            scroll = Offset(residualScroll(), scroll.y)
             pageDataManager.getCachedBitmap(newPageId)?.let { cached ->
                 log.i("PageView: using cached bitmap")
                 windowedBitmap = cached
@@ -580,7 +584,6 @@ class PageView(
             deltaInPage = deltaInPage.copy(y = -scroll.y)
         }
 
-        val pageMode = pageDataManager.getPageMode()
         log.v("Page mode: $pageMode")
         if (pageMode != null && pageMode != PageMode.INFINITE) {
             // Block scrolling in x direction outside chosen sheet size bounds
@@ -591,7 +594,7 @@ class PageView(
             log.d("Viewport size: $viewportWidth x $viewportHeight")
             val viewPortReference = max(viewportWidth, viewportHeight)
             val sheetAdjustedWidth = sheetAdjustedWidth(
-                viewPortReference, pageMode.width, context
+                viewPortReference, pageMode!!.width, context
             )
             val adjustedViewportWidth = viewportWidth / zoomLevel.value
             val scrollAvailable = sheetAdjustedWidth - adjustedViewportWidth
@@ -883,7 +886,6 @@ class PageView(
 
     fun drawBgToCanvas(clipRect: Rect?) {
         val backgroundType = pageDataManager.getBackgroundType() ?: BackgroundType.Native
-        val pageMode = pageDataManager.getPageMode()
         val bg = pageDataManager.getBackgroundName()
         val pageNumber = currentPageNumber
         val scale = zoomLevel.value
@@ -917,38 +919,46 @@ class PageView(
         )
     }
 
+    fun residualScroll(): Float {
+        var residualScroll = scroll.x
+
+//        val pageMode = pageDataManager.getPageMode()
+
+        log.d("Picked up pageMode $pageMode")
+
+        // Handle case when not using infinite sheet mode
+        if (pageMode != null && pageMode != PageMode.INFINITE) {
+
+
+            val sheetAdjustedWidth = sheetAdjustedWidth(
+                viewWidth, pageMode!!.width, context
+            )
+
+            // TODO probably newWidth must be adjusted for zoom -> investigate
+            if (sheetAdjustedWidth < viewWidth) { // If sheet smaller than screen width
+                residualScroll = -(viewWidth - sheetAdjustedWidth) / 2
+            } else if (sheetAdjustedWidth == viewWidth.toFloat()) { // If equal to screen width
+                residualScroll = 0f
+            } else { // If sheet bigger than screen width
+                val maxScrollAvailable =
+                    max(0f, sheetAdjustedWidth - viewWidth / zoomLevel.value)
+                residualScroll = min(scroll.x, maxScrollAvailable)
+            }
+        }
+        log.v("residualScroll: $residualScroll, redisidualZoom: ${zoomLevel.value}")
+        return residualScroll
+    }
+
     fun updateDimensions(newWidth: Int, newHeight: Int) {
         if (newWidth != viewWidth || newHeight != viewHeight) {
             log.d("Updating dimensions from: $viewWidth x $viewHeight, to: $newWidth x $newHeight")
 
-            val pageMode = pageDataManager.getPageMode()
-            var residualScroll = scroll.x
-
-            // Handle case when not using infinite sheet mode
-            if (pageMode != null && pageMode != PageMode.INFINITE) {
-
-                val sheetAdjustedWidth = sheetAdjustedWidth(
-                    newWidth, pageMode.width, context
-                )
-
-
-                // TODO probably newWidth must be adjusted for zoom -> investigate
-                if (sheetAdjustedWidth < newWidth) { // If sheet smaller than screen width
-                    residualScroll = -(newWidth - sheetAdjustedWidth) / 2
-                } else if (sheetAdjustedWidth == newWidth.toFloat()) { // If equal to screen width
-                    residualScroll = 0f
-                } else { // If sheet bigger than screen width
-                    val maxScrollAvailable =
-                        max(0f, sheetAdjustedWidth - newWidth / zoomLevel.value)
-                    residualScroll = min(scroll.x, maxScrollAvailable)
-                }
-            }
-
-            log.v("residualScroll: $residualScroll, redisidualZoom: ${zoomLevel.value}")
-            scroll = Offset(residualScroll, scroll.y)
-
             viewWidth = newWidth
             viewHeight = newHeight
+            val residualScroll = residualScroll()
+            scroll = Offset(residualScroll, scroll.y)
+
+
             updateCanvasDimensions()
         }
     }
