@@ -46,7 +46,7 @@ import com.ethran.notable.gestures.ZOOM_SENSITIVITY
 import com.ethran.notable.gestures.ZOOM_SNAP_THRESHOLD
 import com.ethran.notable.ui.SnackConf
 import com.ethran.notable.ui.SnackState
-import com.ethran.notable.ui.convertPointsToPixel
+import com.ethran.notable.ui.sheetAdjustedWidth
 import com.ethran.notable.utils.onError
 import io.shipbook.shipbooksdk.ShipBook
 import kotlinx.coroutines.CoroutineScope
@@ -566,37 +566,6 @@ class PageView(
         return Rect(left, top, right, bottom)
     }
 
-    /**
-     * Calculates the sheet width adjusted to the viewport.
-     *
-     * If the sheet width is within the configured tolerance (2%) of the screen width,
-     * the screen width is used; otherwise, the converted sheet width is returned.
-     *
-     * @param screenWidth the current viewport width in pixels
-     * @param pageWidth the original sheet width in PDF points (1/72 inch)
-     * @return the adjusted sheet width
-     */
-    private fun sheetAdjustedWidth(screenWidth: Int, pageWidth: Int): Float {
-        val sheetTolerance = 0.02f // The max allowed deviation between screen width and sheet width
-        val sheetWidth = convertPointsToPixel(pageWidth, context)
-        val deviation = abs(sheetWidth - screenWidth)
-        val deviationThreshold = screenWidth * sheetTolerance
-        val sheetAdjustedWidth =
-            if (deviation <= deviationThreshold) screenWidth.toFloat() else sheetWidth
-
-        log.d(
-            """
-                    Sheet width: $sheetWidth
-                    View width: $screenWidth
-                    Deviation: $deviation
-                    Deviation threshold: $deviationThreshold
-                    Sheet adjusted width: $sheetAdjustedWidth
-                """.trimIndent()
-        )
-
-        return sheetAdjustedWidth
-    }
-
     suspend fun updateScroll(dragDelta: Offset) {
 //        log.d("Update scroll, dragDelta: $dragDelta, scroll: $scroll, zoomLevel.value: $zoomLevel.value")
         // drag delta is in screen coordinates,
@@ -622,7 +591,7 @@ class PageView(
             log.d("Viewport size: $viewportWidth x $viewportHeight")
             val viewPortReference = max(viewportWidth, viewportHeight)
             val sheetAdjustedWidth = sheetAdjustedWidth(
-                viewPortReference, pageMode.width
+                viewPortReference, pageMode.width, context
             )
             val adjustedViewportWidth = viewportWidth / zoomLevel.value
             val scrollAvailable = sheetAdjustedWidth - adjustedViewportWidth
@@ -959,7 +928,7 @@ class PageView(
             if (pageMode != null && pageMode != PageMode.INFINITE) {
 
                 val sheetAdjustedWidth = sheetAdjustedWidth(
-                    newWidth, pageMode.width
+                    newWidth, pageMode.width, context
                 )
 
 
