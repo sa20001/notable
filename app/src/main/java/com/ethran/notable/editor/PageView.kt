@@ -30,13 +30,22 @@ import com.ethran.notable.data.model.SimplePointF
 import com.ethran.notable.editor.canvas.CanvasEventBus
 import com.ethran.notable.editor.canvas.CanvasEventBus.drawingInProgress
 import com.ethran.notable.editor.canvas.CanvasEventBus.waitForDrawing
-import com.ethran.notable.editor.drawing.drawBg
+import com.ethran.notable.editor.drawing.drawBitmapToCanvas
+import com.ethran.notable.editor.drawing.drawDotPattern
+import com.ethran.notable.editor.drawing.drawDottedBg
+import com.ethran.notable.editor.drawing.drawHexedBg
+import com.ethran.notable.editor.drawing.drawLinedBg
+import com.ethran.notable.editor.drawing.drawMargin
 import com.ethran.notable.editor.drawing.drawOnCanvasFromPage
+import com.ethran.notable.editor.drawing.drawPaginationLine
+import com.ethran.notable.editor.drawing.drawSquaredBg
+import com.ethran.notable.editor.drawing.drawTitleBox
 import com.ethran.notable.editor.utils.div
 import com.ethran.notable.editor.utils.divideStrokesFromCut
 import com.ethran.notable.editor.utils.loadHQPagePreview
 import com.ethran.notable.editor.utils.minus
 import com.ethran.notable.editor.utils.plus
+import com.ethran.notable.editor.utils.scaleRect
 import com.ethran.notable.editor.utils.strokeBounds
 import com.ethran.notable.editor.utils.times
 import com.ethran.notable.editor.utils.toIntOffset
@@ -47,6 +56,7 @@ import com.ethran.notable.gestures.ZOOM_SNAP_THRESHOLD
 import com.ethran.notable.ui.SnackConf
 import com.ethran.notable.ui.SnackState
 import com.ethran.notable.ui.sheetAdjustedWidth
+import com.ethran.notable.ui.sideBarsRectangles
 import com.ethran.notable.utils.onError
 import io.shipbook.shipbooksdk.ShipBook
 import kotlinx.coroutines.CoroutineScope
@@ -570,11 +580,48 @@ class PageView(
         return Rect(left, top, right, bottom)
     }
 
+    /**
+     * Computes the horizontal scroll offset required to center the sheet within the viewport.
+     *
+     * When the sheet is narrower than the viewport, a negative scroll is applied
+     * to center the sheet horizontally within the viewport.
+     */
+    private fun computeScrollApplied(pageMode: PageMode?): Float {
+        var scrollApplied = 0f
+        if (pageMode != null && pageMode != PageMode.INFINITE) {
+
+            val viewportWidth = viewWidth
+            val viewportHeight = viewHeight
+
+            log.d("Viewport size: $viewportWidth x $viewportHeight")
+            val viewPortReference = max(viewportWidth, viewportHeight)
+            val sheetAdjustedWidth = sheetAdjustedWidth(
+                viewPortReference, pageMode.width, context
+            )
+            val adjustedViewportWidth = viewportWidth / zoomLevel.value
+            val scrollAvailable = sheetAdjustedWidth - adjustedViewportWidth
+            scrollApplied = if (scrollAvailable >= 0) scrollAvailable else scrollAvailable / 2
+
+            log.d(
+                """
+                    Scroll available : $scrollAvailable
+                    Scroll applied on X: $scrollApplied
+                    Zoom level: ${zoomLevel.value}
+                """.trimIndent()
+            )
+        }
+
+        return scrollApplied
+    }
+
+
     suspend fun updateScroll(dragDelta: Offset) {
 //        log.d("Update scroll, dragDelta: $dragDelta, scroll: $scroll, zoomLevel.value: $zoomLevel.value")
         // drag delta is in screen coordinates,
         // so we have to scale it back to page coordinates.
         var deltaInPage = Offset(dragDelta.x / zoomLevel.value, dragDelta.y / zoomLevel.value)
+
+        log.d("Delta in page coordinates: $deltaInPage")
 
         // Cut, so we won't shift outside the screen.
         if (scroll.x + deltaInPage.x < 0) {
@@ -585,29 +632,9 @@ class PageView(
         }
 
         log.v("Page mode: $pageMode")
+        // Block scrolling in x direction outside chosen sheet size bounds
         if (pageMode != null && pageMode != PageMode.INFINITE) {
-            // Block scrolling in x direction outside chosen sheet size bounds
-
-            val viewportWidth = viewWidth
-            val viewportHeight = viewHeight
-
-            log.d("Viewport size: $viewportWidth x $viewportHeight")
-            val viewPortReference = max(viewportWidth, viewportHeight)
-            val sheetAdjustedWidth = sheetAdjustedWidth(
-                viewPortReference, pageMode!!.width, context
-            )
-            val adjustedViewportWidth = viewportWidth / zoomLevel.value
-            val scrollAvailable = sheetAdjustedWidth - adjustedViewportWidth
-            val scrollApplied = if (scrollAvailable >= 0) scrollAvailable else scrollAvailable / 2
-
-            log.d(
-                """
-                    Scroll available : $scrollAvailable
-                    Scroll applied on X: $scrollApplied
-                    Zoom level: ${zoomLevel.value}
-                """.trimIndent()
-            )
-
+            val scrollApplied = computeScrollApplied(pageMode)
             if (scroll.x + deltaInPage.x > scrollApplied) {
                 deltaInPage = deltaInPage.copy(
                     x = scrollApplied - scroll.x
@@ -736,6 +763,10 @@ class PageView(
 
         log.d("Redrawing full logical rect: $redrawRect")
         windowedCanvas.drawColor(Color.GREEN)
+
+        // Calculate the scroll required to recenter the sheet after zoom
+        scroll = Offset(computeScrollApplied(pageMode), scroll.y)
+
         drawBgToCanvas(redrawRect)
         pageDataManager.cacheBitmap(currentPageId, windowedBitmap)
 
@@ -819,12 +850,17 @@ class PageView(
 
 //        persistBitmapDebounced()
         saveToPersistLayer()
-        log.i(
-            "Zoom updated using snapshot scaling. " +
-                    "oldZoom=$oldZoom newZoom=$newZoom " +
-                    "scaleFactor=$scaleFactor pivot=($pivotX,$pivotY) " +
-                    "bounds=$dstRect" +
-                    "scrollDelta=$deltaScrollPage newScroll=$scroll"
+        log.d(
+            """
+                    Zoom updated using snapshot scaling.
+                    oldZoom=$oldZoom
+                    newZoom=$newZoom
+                    scaleFactor=$scaleFactor
+                    pivot=($pivotX,$pivotY)
+                    bounds=$dstRect
+                    scrollDelta=$deltaScrollPage
+                    newScroll=$scroll
+                    """.trimIndent()
         )
     }
 
@@ -905,18 +941,66 @@ class PageView(
                     null
                 }
             }
-        drawBg(
-            canvas = windowedCanvas,
-            backgroundType = backgroundType,
-            background = bg,
-            scroll = scroll,
-            resourceBitmap = bgImage,
-            scale = scale,
-            repeat = false,
-            clipRect = clipRect,
-            context = context,
-            pageMode = pageMode
-        )
+
+        val repeat = false // TODO use value passed from UI, do not hardcode it
+
+        log.v("Loading the background")
+        clipRect?.let {
+            windowedCanvas.save()
+            windowedCanvas.clipRect(scaleRect(it, scale))
+        }
+
+        when (backgroundType) {
+            // draw native background for it we don't need a resource
+            is BackgroundType.Native -> {
+                when (bg) {
+                    "blank" -> windowedCanvas.drawColor(Color.WHITE)
+                    "dotted" -> drawDottedBg(windowedCanvas, scroll, scale)
+                    "lined" -> drawLinedBg(windowedCanvas, scroll, scale)
+                    "squared" -> drawSquaredBg(windowedCanvas, scroll, scale)
+                    "hexed" -> drawHexedBg(windowedCanvas, scroll, scale)
+                    else -> {
+                        // Reaching the Native branch with an unknown value usually means the *type*
+                        // detection misclassified a non-native background (e.g. a .pdf) as Native, not
+                        // that the string is merely unknown — surface the type so it's obvious.
+                        throw IllegalArgumentException(
+                            "Unknown native background '$bg' (type=$backgroundType)"
+                        )
+                    }
+                }
+                for (rect in sideBarsRectangles(
+                    pageMode,
+                    windowedCanvas.width,
+                    windowedCanvas.height,
+                    zoomLevel.value,
+                    context
+                )) {// Draw sidebars
+                    drawDotPattern(windowedCanvas, rect, zoomLevel.value)
+                }
+            }
+
+            else -> {
+                if (bgImage != null) {
+                    drawBitmapToCanvas(windowedCanvas, bgImage, scroll, scale, repeat)
+                    if (backgroundType is BackgroundType.CoverImage) {
+                        drawTitleBox(windowedCanvas)
+                    }
+                } else {
+                    log.i("No resource provided to draw, maybe out of pages in pdf?")
+                    windowedCanvas.drawColor(Color.WHITE)
+                }
+            }
+        }
+        if (pageMode == PageMode.INFINITE) {
+            drawMargin(windowedCanvas, scroll, scale)
+        }
+
+        // Draw the page line if using a page with defined size
+        drawPaginationLine(windowedCanvas, scroll, scale, context, pageMode)
+
+        if (clipRect != null) {
+            windowedCanvas.restore()
+        }
     }
 
     fun residualScroll(): Float {

@@ -158,6 +158,7 @@ fun setupSurface(view: View, touchHelper: TouchHelper?, toolbarHeight: Int) {
 
     // Get elements to calculate adjusted page width
     val pageView = (view as DrawCanvas).pageView
+    val zoomLevel = pageView.zoomLevel.value
     val pageMode = pageView.pageDataManager.getPageMode()
     val context = pageView.context
     log.i("Surface is of type: $pageMode")
@@ -166,7 +167,7 @@ fun setupSurface(view: View, touchHelper: TouchHelper?, toolbarHeight: Int) {
     val excludeRectList = mutableListOf<Rect>()
 
     // Exclude area based on page mode
-    excludeRectList.addAll(sideBarsRectangles(pageMode, viewWidth, viewHeight, context))
+    excludeRectList.addAll(sideBarsRectangles(pageMode, viewWidth, viewHeight, zoomLevel, context))
 
     // Exclude area based on toolbar position
     val excludeRect: Rect =

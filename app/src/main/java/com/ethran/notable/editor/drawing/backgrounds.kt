@@ -11,14 +11,12 @@ import android.graphics.Rect
 import android.graphics.RectF
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntOffset
+import androidx.core.graphics.withScale
 import com.ethran.notable.SCREEN_HEIGHT
 import com.ethran.notable.SCREEN_WIDTH
 import com.ethran.notable.data.datastore.PageMode
-import com.ethran.notable.data.model.BackgroundType
-import com.ethran.notable.editor.utils.scaleRect
 import com.ethran.notable.ui.convertPointsToPixel
 import com.ethran.notable.ui.sheetAdjustedWidth
-import com.ethran.notable.ui.sideBarsRectangles
 import com.onyx.android.sdk.extension.copy
 import io.shipbook.shipbooksdk.ShipBook
 import kotlin.math.cos
@@ -282,108 +280,43 @@ fun drawBitmapToCanvas(
     }
 }
 
-private fun drawDotPattern(canvas: Canvas, rect: Rect) {
+fun drawDotPattern(canvas: Canvas, rect: Rect, scale: Float) {
 
-    // Background
-    /*
-     * TODO: Remove when/if the background rendering is overhauled.
-     * Ideally, background drawing functions should be constrained to the sheet bounds
-     * instead of drawing across the entire canvas, eliminating the need to cover
-     * the areas outside the sheet with white rectangles.
-     *
-     * For now, they draw across the entire canvas, so the white rectangles are necessary.
-     */
-    canvas.drawRect(
-        rect.left.toFloat(),
-        rect.top.toFloat(),
-        rect.right.toFloat(),
-        rect.bottom.toFloat(),
-        Paint().apply { color = Color.WHITE }
-    )
+    canvas.withScale( // Use no scale to apply the dow pattern
+        1f / scale, 1f / scale
+    ) {
 
-    val spacing = 9
-    val radius = 1.25f
 
-    for (y in rect.top until rect.bottom step spacing) {
-        for (x in rect.left until rect.right step spacing) {
-            canvas.drawCircle(
-                x.toFloat(),
-                y.toFloat(),
-                radius,
-                sideBarPaint
-            )
-        }
-    }
-}
+        // Background
+        /*
+         * TODO: Remove when/if the background rendering is overhauled.
+         * Ideally, background drawing functions should be constrained to the sheet bounds
+         * instead of drawing across the entire canvas, eliminating the need to cover
+         * the areas outside the sheet with white rectangles.
+         *
+         * For now, they draw across the entire canvas, so the white rectangles are necessary.
+         */
+        canvas.drawRect(
+            rect.left.toFloat(),
+            rect.top.toFloat(),
+            rect.right.toFloat(),
+            rect.bottom.toFloat(),
+            Paint().apply { color = Color.WHITE }
+        )
 
-fun drawBg(
-    canvas: Canvas,
-    backgroundType: BackgroundType,
-    background: String,
-    pageMode: PageMode?,
-    scroll: Offset = Offset.Zero,
-    resourceBitmap: Bitmap?,
-    scale: Float = 1f,          // When exporting, we change scale of canvas. therefore canvas.width/height is scaled
-    repeat: Boolean = false,    // for repeating image
-    clipRect: Rect? = null,     // before the scaling
-    context: Context,
-) {
+        val spacing = 9
+        val radius = 1.25f
 
-    log.v("Loading the background")
-    clipRect?.let {
-        canvas.save()
-        canvas.clipRect(scaleRect(it, scale))
-    }
-
-    when (backgroundType) {
-        // draw native background for it we don't need a resource
-        is BackgroundType.Native -> {
-            when (background) {
-                "blank" -> canvas.drawColor(Color.WHITE)
-                "dotted" -> drawDottedBg(canvas, scroll, scale)
-                "lined" -> drawLinedBg(canvas, scroll, scale)
-                "squared" -> drawSquaredBg(canvas, scroll, scale)
-                "hexed" -> drawHexedBg(canvas, scroll, scale)
-                else -> {
-                    // Reaching the Native branch with an unknown value usually means the *type*
-                    // detection misclassified a non-native background (e.g. a .pdf) as Native, not
-                    // that the string is merely unknown — surface the type so it's obvious.
-                    throw IllegalArgumentException(
-                        "Unknown native background '$background' (type=$backgroundType)"
-                    )
-                }
-            }
-            for (rect in sideBarsRectangles(
-                pageMode,
-                canvas.width,
-                canvas.height,
-                context
-            )) {// Draw sidebars
-                drawDotPattern(canvas, rect)
+        for (y in rect.top until rect.bottom step spacing) {
+            for (x in rect.left until rect.right step spacing) {
+                canvas.drawCircle(
+                    x.toFloat(),
+                    y.toFloat(),
+                    radius,
+                    sideBarPaint
+                )
             }
         }
-
-        else -> {
-            if (resourceBitmap != null) {
-                drawBitmapToCanvas(canvas, resourceBitmap, scroll, scale, repeat)
-                if (backgroundType is BackgroundType.CoverImage) {
-                    drawTitleBox(canvas)
-                }
-            } else {
-                log.i("No resource provided to draw, maybe out of pages in pdf?")
-                canvas.drawColor(Color.WHITE)
-            }
-        }
-    }
-    if (pageMode == PageMode.INFINITE) {
-        drawMargin(canvas, scroll, scale)
-    }
-
-    // Draw the page line if using a page with defined size
-    drawPaginationLine(canvas, scroll, scale, context, pageMode)
-
-    if (clipRect != null) {
-        canvas.restore()
     }
 }
 
@@ -418,6 +351,7 @@ fun drawPaginationLine(
         canvas.width, pageMode.width, context
     )
 
+
     // Convert scroll position to canvas coordinates
     // Calculate current page number (1-based)
     val currentPage = floor(scroll.y / sheetHeightPixels).toInt() + 1
@@ -425,19 +359,29 @@ fun drawPaginationLine(
     // Calculate position of first page break
     var yPos = (currentPage * sheetHeightPixels) - scroll.y
 
+    val residualScrollX = scroll.x
+    val startX = -residualScrollX
+    val stopX = -residualScrollX + sheetAdjustedWidth
+    log.d(
+        """
+    Sheet adj width $sheetAdjustedWidth, scrollX $residualScrollX
+    StartX $startX, stopX $stopX
+    """.trimIndent()
+    )
+
     var pageNum = currentPage
     while (yPos < canvas.height / scale) {
         canvas.drawLine(
-            -scroll.x,
+            startX,
             yPos,
-            -scroll.x + sheetAdjustedWidth,
+            stopX,
             yPos,
             paginationLinePaint
         )
 
         canvas.drawText(
             "Subpage ${pageNum + 1}",
-            20f - scroll.x,
+            20f - residualScrollX,
             yPos + 30f,
             textPaint
         )

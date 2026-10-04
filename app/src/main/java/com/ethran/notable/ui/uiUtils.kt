@@ -58,6 +58,7 @@ fun convertPointsToPixel(points: Int, context: Context): Float {
  * @return the adjusted sheet width
  */
 fun sheetAdjustedWidth(screenWidth: Int, pageWidth: Int, context: Context): Float {
+    // TODO instead of percentage use points for tolerance
     val sheetTolerance = 0.02f // The max allowed deviation between screen width and sheet width
     val sheetWidth = convertPointsToPixel(pageWidth, context)
     val deviation = abs(sheetWidth - screenWidth)
@@ -67,11 +68,11 @@ fun sheetAdjustedWidth(screenWidth: Int, pageWidth: Int, context: Context): Floa
 
     log.d(
         """
-                    Sheet width: $sheetWidth
-                    View width: $screenWidth
-                    Deviation: $deviation
-                    Deviation threshold: $deviationThreshold
-                    Sheet adjusted width: $sheetAdjustedWidth
+            Sheet width: $sheetWidth
+            View width: $screenWidth
+            Deviation: $deviation
+            Deviation threshold: $deviationThreshold
+            Sheet width adjusted: $sheetAdjustedWidth
                 """.trimIndent()
     )
 
@@ -82,12 +83,14 @@ fun sideBarsRectangles(
     pageMode: PageMode?,
     viewWidth: Int,
     viewHeight: Int,
+    zoomLevel: Float,
     context: Context
 ): List<Rect> {
     val rectList = mutableListOf<Rect>()
     if (pageMode != null && pageMode != PageMode.INFINITE) {
         val pageWidth = pageMode.width
-        val sheetAdjustedWidth = sheetAdjustedWidth(viewWidth, pageWidth, context)
+        val sheetWidthOG = sheetAdjustedWidth(viewWidth, pageWidth, context)
+        val sheetAdjustedWidth = sheetWidthOG * zoomLevel
         if (sheetAdjustedWidth < viewWidth) {
             val offset = Pair(ceil((viewWidth - sheetAdjustedWidth) / 2).toInt(), viewHeight)
 
@@ -98,7 +101,15 @@ fun sideBarsRectangles(
             )
             val sheetAdjustedInt = sheetAdjustedWidth.roundToInt()
 
-            log.v("sheetAdjustedInt: $sheetAdjustedInt, viewWidth: $viewWidth, offset: $offset")
+            log.d("""
+                Sheet width original: 
+                Sheet width adjusted: $sheetAdjustedWidth
+                To int: $sheetAdjustedInt
+                viewWidth: $viewWidth
+                offset: $offset
+                zoomLevel $zoomLevel
+            """.trimIndent()
+            )
 
             rectList.add( // Add right rectangle
                 Rect(sideExcludeRect).apply {
