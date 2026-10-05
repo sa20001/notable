@@ -631,15 +631,10 @@ class PageView(
             deltaInPage = deltaInPage.copy(y = -scroll.y)
         }
 
-        log.v("Page mode: $pageMode")
-        // Block scrolling in x direction outside chosen sheet size bounds
         if (pageMode != null && pageMode != PageMode.INFINITE) {
-            val scrollApplied = computeScrollApplied(pageMode)
-            if (scroll.x + deltaInPage.x > scrollApplied) {
-                deltaInPage = deltaInPage.copy(
-                    x = scrollApplied - scroll.x
-                )
-            }
+            deltaInPage = deltaInPage.copy(
+                x = calculateDeltaNeededToCenterSheet(deltaInPage.x)
+            )
         }
 
         // There is nothing to do, return.
@@ -778,6 +773,22 @@ class PageView(
 
 
     /**
+     * Calculate the delta needed on x-axis to center the sheet if sheet width is smaller
+     * than screen width.
+     */
+    private fun calculateDeltaNeededToCenterSheet(deltaInX:Float): Float {
+        var deltaOutX : Float = 0f
+        if (pageMode != null && pageMode != PageMode.INFINITE) {
+            val scrollApplied = computeScrollApplied(pageMode)
+            // Block scrolling in x direction outside sheet size bounds
+            if (scroll.x + deltaInX > scrollApplied) {
+                deltaOutX = scrollApplied - scroll.x
+            }
+        }
+        return deltaOutX
+    }
+
+    /**
      * Update zoom by reusing the existing screen bitmap.
      * - Scales the snapshot around the given center (screen coords).
      * - Redraws only the uncovered bands when zooming out.
@@ -821,7 +832,6 @@ class PageView(
         val dstRect = RectF()
         matrix.mapRect(dstRect, srcRect)
 
-
         //make sure that we won't go outside canvas.
         val dx = (scroll.x - dstRect.left).coerceAtMost(0f)
         val dy = (scroll.y - dstRect.top).coerceAtMost(0f)
@@ -832,19 +842,18 @@ class PageView(
         scaledCanvas.drawBitmap(windowedBitmap, matrix, null)
 
 
-        val deltaScrollPage = Offset(-dstRect.left / newZoom, -dstRect.top / newZoom)
-
-
-        val newScrollX = (scroll.x + deltaScrollPage.x).coerceAtLeast(0f)
-        val newScrollY = (scroll.y + deltaScrollPage.y).coerceAtLeast(0f)
-        scroll = Offset(newScrollX, newScrollY)
-
         // Swap in the new bitmap and update zoom on the windowed canvas
         windowedBitmap = scaledBitmap
         windowedCanvas.setBitmap(windowedBitmap)
 
         zoomLevel.value = newZoom
         windowedCanvas.scale(zoomLevel.value, zoomLevel.value)
+
+        val deltaScrollPage = Offset(-dstRect.left / newZoom, -dstRect.top / newZoom)
+        val newScrollX = (scroll.x + deltaScrollPage.x).coerceAtLeast(0f)
+        val newScrollY = (scroll.y + deltaScrollPage.y).coerceAtLeast(0f)
+        scroll = Offset(newScrollX, newScrollY)
+        scroll += Offset(calculateDeltaNeededToCenterSheet(0f), 0f)
 
         if (scaleFactor < 1f) redrawOutsideRect(dstRect.toRect(), screenW, screenH)
 
