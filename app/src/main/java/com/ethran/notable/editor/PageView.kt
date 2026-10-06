@@ -597,9 +597,9 @@ class PageView(
             val viewportHeight = viewHeight
 
             log.d("Viewport size: $viewportWidth x $viewportHeight")
-            val viewPortReference = max(viewportWidth, viewportHeight)
+//            val viewPortReference = max(viewportWidth, viewportHeight)
             val sheetAdjustedWidth = sheetAdjustedWidth(
-                viewPortReference, pageMode.width, context
+                viewportWidth, pageMode.width, context
             )
             val adjustedViewportWidth = viewportWidth / zoomLevel.value
             val scrollAvailable = sheetAdjustedWidth - adjustedViewportWidth
@@ -617,6 +617,31 @@ class PageView(
         return scrollToCenterSheet
     }
 
+
+    /**
+     * Calculate the max allowed delta scroll on x given the current sheet size
+     */
+    private fun maxAllowedScrollX(deltaInX: Float): Float
+    {
+        var deltaOutX: Float = 0f
+        if (pageMode != null && pageMode != PageMode.INFINITE) {
+            val scrollToCenterSheet = scrollToCenterSheet(pageMode)
+            // Block scrolling in x direction outside sheet size bounds
+            deltaOutX = if (scroll.x + deltaInX > scrollToCenterSheet) {
+                scrollToCenterSheet - scroll.x
+            } else{
+                deltaInX
+            }
+        }
+        log.d(
+            """
+                    Scroll x: ${scroll.x}
+                    Delta in x: $deltaInX
+                    Delta out x: $deltaOutX
+        """.trimIndent()
+        )
+        return deltaOutX
+    }
 
     suspend fun updateScroll(dragDelta: Offset) {
 //        log.d("Update scroll, dragDelta: $dragDelta, scroll: $scroll, zoomLevel.value: $zoomLevel.value")
@@ -636,7 +661,7 @@ class PageView(
 
         if (pageMode != null && pageMode != PageMode.INFINITE) {
             deltaInPage = deltaInPage.copy(
-                x = calculateDeltaNeededToCenterSheet(deltaInPage.x)
+                x = maxAllowedScrollX(deltaInPage.x)
             )
         }
 
@@ -779,23 +804,8 @@ class PageView(
      * Calculate the delta needed on x-axis to center the sheet if sheet width is smaller
      * than screen width.
      */
-    private fun calculateDeltaNeededToCenterSheet(deltaInX: Float): Float {
-        var deltaOutX: Float = 0f
-        if (pageMode != null && pageMode != PageMode.INFINITE) {
-            val scrollToCenterSheet = scrollToCenterSheet(pageMode)
-            // Block scrolling in x direction outside sheet size bounds
-            if (scroll.x + deltaInX > scrollToCenterSheet) {
-                deltaOutX = scrollToCenterSheet - scroll.x
-            }
-        }
-        log.d(
-            """
-                    Scroll x: ${scroll.x}
-                    Delta in x: $deltaInX
-                    Delta out x: $deltaOutX
-        """.trimIndent()
-        )
-        return deltaOutX
+    private fun calculateDeltaNeededToCenterSheet(): Float {
+        return maxAllowedScrollX(0f)
     }
 
     /**
@@ -863,7 +873,7 @@ class PageView(
         val newScrollX = (scroll.x + deltaScrollPage.x).coerceAtLeast(0f)
         val newScrollY = (scroll.y + deltaScrollPage.y).coerceAtLeast(0f)
         scroll = Offset(newScrollX, newScrollY)
-        scroll += Offset(calculateDeltaNeededToCenterSheet(0f), 0f)
+        scroll += Offset(calculateDeltaNeededToCenterSheet(), 0f)
 
         if (scaleFactor < 1f) redrawOutsideRect(dstRect.toRect(), screenW, screenH)
 
