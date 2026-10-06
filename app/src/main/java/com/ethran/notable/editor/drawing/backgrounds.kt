@@ -317,6 +317,25 @@ fun drawDotPattern(canvas: Canvas, rect: Rect, scale: Float) {
                 )
             }
         }
+
+        paginationLinePaint.pathEffect = DashPathEffect(
+            floatArrayOf(10f, 10f), // dash length, gap length
+            0f
+        )
+        var startX = 0f
+        startX = if (rect.left == 0) { // if left rectangle
+            rect.right.toFloat()
+        } else{ // if right rectangle
+            rect.left.toFloat()
+        }
+
+        canvas.drawLine(
+            startX,
+            padding.toFloat(),
+            startX,
+            (canvas.height - padding).toFloat(),
+            marginPaint
+        )
     }
 }
 
