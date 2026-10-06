@@ -656,7 +656,7 @@ class PageView(
             it.width == width && it.height == height && it.config == windowedBitmap.config
         } ?: createBitmap(width, height, windowedBitmap.config!!)
         val shiftedCanvas = Canvas(shiftedBitmap)
-        shiftedCanvas.drawColor(Color.RED) //for debugging.
+//        shiftedCanvas.drawColor(Color.RED) //for debugging.
         shiftedCanvas.drawBitmap(windowedBitmap, -movement.x, -movement.y, null)
 
         // Swap in the shifted bitmap; the old live buffer becomes the next spare.
@@ -820,7 +820,7 @@ class PageView(
         // Draw scaled snapshot into a fresh screen-sized bitmap
         val scaledBitmap = createBitmap(screenW, screenH, windowedBitmap.config!!)
         val scaledCanvas = Canvas(scaledBitmap)
-        scaledCanvas.drawColor(Color.RED) // clear
+//        scaledCanvas.drawColor(Color.RED) // used for debug
 
         val matrix = Matrix().apply {
             postScale(scaleFactor, scaleFactor, pivotX, pivotY)
