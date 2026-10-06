@@ -199,12 +199,14 @@ class PageView(
                 log.e("Current page id is empty")
 
             zoomLevel.value = pageDataManager.getPageZoom(currentPageId)
+            scroll = pageDataManager.getPageScroll(currentPageId)
             pageDataManager.getCachedBitmap(currentPageId)?.let { cached ->
-                log.i("PageView: using cached bitmap")
+                log.i("Opening document page: using cached bitmap")
+                log.d("Current zoom: ${zoomLevel.value} and scroll: $scroll")
                 windowedBitmap = cached
                 windowedCanvas = Canvas(windowedBitmap)
             } ?: run {
-                log.i("PageView.init: creating new bitmap")
+                log.i("Opening document page: creating new bitmap")
                 recreateCanvas()
                 pageDataManager.cacheBitmap(currentPageId, windowedBitmap)
             }
@@ -248,7 +250,7 @@ class PageView(
             zoomLevel.value = pageDataManager.getPageZoom(currentPageId)
             scroll = Offset(residualScroll(), scroll.y)
             pageDataManager.getCachedBitmap(newPageId)?.let { cached ->
-                log.i("PageView: using cached bitmap")
+                log.i("ChangePage: using cached bitmap")
                 windowedBitmap = cached
                 windowedCanvas = Canvas(windowedBitmap)
                 // Check if we have correct size of canvas
@@ -275,6 +277,7 @@ class PageView(
     private fun recreateCanvas() {
         windowedBitmap = createBitmap(viewWidth, viewHeight)
         windowedCanvas = Canvas(windowedBitmap)
+        windowedCanvas.scale(zoomLevel.value, zoomLevel.value)
         loadInitialBitmap()
     }
 
@@ -586,8 +589,8 @@ class PageView(
      * When the sheet is narrower than the viewport, a negative scroll is applied
      * to center the sheet horizontally within the viewport.
      */
-    private fun computeScrollApplied(pageMode: PageMode?): Float {
-        var scrollApplied = 0f
+    private fun scrollToCenterSheet(pageMode: PageMode?): Float {
+        var scrollToCenterSheet = 0f
         if (pageMode != null && pageMode != PageMode.INFINITE) {
 
             val viewportWidth = viewWidth
@@ -600,18 +603,18 @@ class PageView(
             )
             val adjustedViewportWidth = viewportWidth / zoomLevel.value
             val scrollAvailable = sheetAdjustedWidth - adjustedViewportWidth
-            scrollApplied = if (scrollAvailable >= 0) scrollAvailable else scrollAvailable / 2
+            scrollToCenterSheet = if (scrollAvailable >= 0) scrollAvailable else scrollAvailable / 2
 
             log.d(
                 """
                     Scroll available : $scrollAvailable
-                    Scroll applied on X: $scrollApplied
+                    Scroll needed on X to center sheet: $scrollToCenterSheet
                     Zoom level: ${zoomLevel.value}
                 """.trimIndent()
             )
         }
 
-        return scrollApplied
+        return scrollToCenterSheet
     }
 
 
@@ -656,7 +659,7 @@ class PageView(
             it.width == width && it.height == height && it.config == windowedBitmap.config
         } ?: createBitmap(width, height, windowedBitmap.config!!)
         val shiftedCanvas = Canvas(shiftedBitmap)
-//        shiftedCanvas.drawColor(Color.RED) //for debugging.
+//        shiftedCanvas.drawColor(Color.RED) // used for debug
         shiftedCanvas.drawBitmap(windowedBitmap, -movement.x, -movement.y, null)
 
         // Swap in the shifted bitmap; the old live buffer becomes the next spare.
@@ -760,7 +763,7 @@ class PageView(
         windowedCanvas.drawColor(Color.GREEN)
 
         // Calculate the scroll required to recenter the sheet after zoom
-        scroll = Offset(computeScrollApplied(pageMode), scroll.y)
+        scroll = Offset(scrollToCenterSheet(pageMode), scroll.y)
 
         drawBgToCanvas(redrawRect)
         pageDataManager.cacheBitmap(currentPageId, windowedBitmap)
@@ -776,15 +779,22 @@ class PageView(
      * Calculate the delta needed on x-axis to center the sheet if sheet width is smaller
      * than screen width.
      */
-    private fun calculateDeltaNeededToCenterSheet(deltaInX:Float): Float {
-        var deltaOutX : Float = 0f
+    private fun calculateDeltaNeededToCenterSheet(deltaInX: Float): Float {
+        var deltaOutX: Float = 0f
         if (pageMode != null && pageMode != PageMode.INFINITE) {
-            val scrollApplied = computeScrollApplied(pageMode)
+            val scrollToCenterSheet = scrollToCenterSheet(pageMode)
             // Block scrolling in x direction outside sheet size bounds
-            if (scroll.x + deltaInX > scrollApplied) {
-                deltaOutX = scrollApplied - scroll.x
+            if (scroll.x + deltaInX > scrollToCenterSheet) {
+                deltaOutX = scrollToCenterSheet - scroll.x
             }
         }
+        log.d(
+            """
+                    Scroll x: ${scroll.x}
+                    Delta in x: $deltaInX
+                    Delta out x: $deltaOutX
+        """.trimIndent()
+        )
         return deltaOutX
     }
 
@@ -1027,15 +1037,18 @@ class PageView(
                 viewWidth, pageMode!!.width, context
             )
 
-            // TODO probably newWidth must be adjusted for zoom -> investigate
-            if (sheetAdjustedWidth < viewWidth) { // If sheet smaller than screen width
-                residualScroll = -(viewWidth - sheetAdjustedWidth) / 2
-            } else if (sheetAdjustedWidth == viewWidth.toFloat()) { // If equal to screen width
+            val viewWidthAdj = viewWidth / zoomLevel.value
+            if (sheetAdjustedWidth < viewWidthAdj) { // If sheet smaller than viewWidth
+                residualScroll = -(viewWidthAdj - sheetAdjustedWidth) / 2
+                log.d("Sheet width smaller than vieWidth")
+            } else if (sheetAdjustedWidth == viewWidthAdj) { // If equal to viewWidth
                 residualScroll = 0f
-            } else { // If sheet bigger than screen width
+                log.d("Sheet width equal to vieWidth")
+            } else { // If sheet bigger than viewWidth
                 val maxScrollAvailable =
-                    max(0f, sheetAdjustedWidth - viewWidth / zoomLevel.value)
+                    max(0f, sheetAdjustedWidth - viewWidthAdj)
                 residualScroll = min(scroll.x, maxScrollAvailable)
+                log.d("Sheet width bigger than vieWidth")
             }
         }
         log.v("residualScroll: $residualScroll, redisidualZoom: ${zoomLevel.value}")
@@ -1059,8 +1072,7 @@ class PageView(
     private fun updateCanvasDimensions() {
         // Recreate bitmap and canvas with new dimensions
         recreateCanvas()
-        //Reset zoom level.
-        zoomLevel.value = 1.0f
+
         // TODO: it might be worth to do it
         //  by redrawing only part of the screen, like in scroll and zoom.
         coroutineScope.launch {
