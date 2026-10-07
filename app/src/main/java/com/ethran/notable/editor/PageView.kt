@@ -106,6 +106,10 @@ class PageView(
 
     private var pageMode: PageMode? = null
 
+    // The coroutine that loads the initial page. Read-only outside the class so tests can wait for
+    // the page to be ready deterministically (see [awaitPageReady]) instead of polling internals.
+    internal val initJob: Job
+
     @Volatile
     var windowedBitmap = createBitmap(viewWidth, viewHeight)
         private set
@@ -191,7 +195,7 @@ class PageView(
 
 
     init {
-        coroutineScope.launch(Dispatchers.IO) {
+        initJob = coroutineScope.launch(Dispatchers.IO) {
             // set page, and retrieve page data from db
             pageDataManager.setPage(initialPageId)
             log.i("PageView init with initial pageId: $initialPageId")
@@ -222,6 +226,17 @@ class PageView(
             log.d("Page loaded (Init with id: $currentPageId)")
             pageDataManager.collectAndPersistBitmapsBatch(context, coroutineScope)
         }
+    }
+
+    /**
+     * Suspends until the initial page load, and the stroke/image load it starts, have finished.
+     *
+     * Internal for tests: production code never needs it, because the UI is refreshed by the events
+     * this class emits. [loadingJob] is only joined if [loadPage] already started it.
+     */
+    internal suspend fun awaitPageReady() {
+        initJob.join()
+        loadingJob?.join()
     }
 
     /**
