@@ -198,8 +198,11 @@ class PageView(
             if (currentPageId.isEmpty())
                 log.e("Current page id is empty")
 
+            pageMode = pageDataManager.getPageMode()
             zoomLevel.value = pageDataManager.getPageZoom(currentPageId)
             scroll = pageDataManager.getPageScroll(currentPageId)
+            // Center the sheet before the first draw.
+            scroll = Offset(residualScroll(), scroll.y)
             pageDataManager.getCachedBitmap(currentPageId)?.let { cached ->
                 log.i("Opening document page: using cached bitmap")
                 log.d("Current zoom: ${zoomLevel.value} and scroll: $scroll")
@@ -218,7 +221,6 @@ class PageView(
             loadPage()
             log.d("Page loaded (Init with id: $currentPageId)")
             pageDataManager.collectAndPersistBitmapsBatch(context, coroutineScope)
-            pageMode = pageDataManager.getPageMode()
         }
     }
 
