@@ -136,6 +136,7 @@ object NotebookSerializer {
             background = page.background,
             backgroundType = page.backgroundType,
             parentFolderId = page.parentFolderId,
+            pageMode = page.pageMode,
             scroll = page.scroll,
             createdAt = page.createdAt.toInstant().toString(),
             updatedAt = page.updatedAt.toInstant().toString()
@@ -360,6 +361,7 @@ object NotebookSerializer {
         val background: String,
         val backgroundType: String,
         val parentFolderId: String?,
+        val pageMode: PageMode?,
         val scroll: Int,
         val createdAt: String,
         val updatedAt: String
@@ -373,7 +375,7 @@ object NotebookSerializer {
         val background: String,
         val backgroundType: String,
         val parentFolderId: String?,
-        val pageMode: PageMode?,
+        val pageMode: PageMode? = null,
         val scroll: Int,
         val createdAt: String,
         val updatedAt: String,
