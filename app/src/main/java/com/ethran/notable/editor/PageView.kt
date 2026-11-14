@@ -120,8 +120,14 @@ class PageView(
 
     private var loadingJob: Job? = null
 
-    // The coroutine that loads the initial page; [awaitPageReady] lets tests wait for it.
-    internal val initJob: Job
+    /**
+     * Loads the initial page, and completes when that is done; [awaitPageReady] waits on it. This,
+     * and not [pageChangeJob], is what a wait can join: the collector runs for the view's whole life.
+     */
+    private val initialPageLoadJob: Job
+
+    /** Shows each page the editor asks for, once [initialPageLoadJob] has shown the first. */
+    private val pageChangeJob: Job
 
     @Volatile
     var windowedBitmap = createBitmap(viewWidth, viewHeight)
@@ -219,10 +225,15 @@ class PageView(
 
 
     init {
-        initJob = coroutineScope.launch(Dispatchers.IO) {
-            log.i("PageView init with initial pageId: $initialPageId")
-            if (!switchToPage(initialPageId)) return@launch
-
+        log.i("PageView init with initial pageId: $initialPageId")
+        initialPageLoadJob = coroutineScope.launch(Dispatchers.IO) {
+            switchToPage(initialPageId)
+        }
+        // Page changes wait for the first page to be shown, so the two never switch at once, as they
+        // didn't when one coroutine did both. The collector is separate because it never finishes:
+        // joining it, as a wait for the initial load used to, would wait forever.
+        pageChangeJob = coroutineScope.launch(Dispatchers.IO) {
+            initialPageLoadJob.join()
             requestedPageId.collect { pageId ->
                 if (pageId != currentPageId) switchToPage(pageId)
             }
@@ -234,7 +245,7 @@ class PageView(
      * [loadingJob] is only joined if [loadPage] already started it.
      */
     internal suspend fun awaitPageReady() {
-        initJob.join()
+        initialPageLoadJob.join()
         loadingJob?.join()
     }
 

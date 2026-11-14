@@ -113,13 +113,15 @@ internal class PageViewFixture internal constructor(
      * its page: its record read, its viewport fitted to the sheet, its screen bitmap in place — and
      * fetched its strokes and images.
      *
-     * [PageView.awaitPageReady] is the supported wait for a load, and it is joined here; but the
-     * loader for the initial page goes on collecting page-change requests for as long as the view
-     * lives, so that join cannot finish on its own while the view is open. The wait is therefore
-     * bounded, and the state the load produces is what confirms it.
+     * [PageView.awaitPageReady] is the supported wait for a load. It is bounded so a hang shows up
+     * as this clear failure rather than as the suite's own test timeout, and the state the load
+     * produces is checked afterwards to confirm the page really is shown and loaded.
      */
     fun awaitInitialization(view: PageView = page) {
-        runBlocking { withTimeoutOrNull(JOIN_WAIT_MS) { view.awaitPageReady() } }
+        val outcome = runBlocking { withTimeoutOrNull(JOIN_WAIT_MS) { view.awaitPageReady() } }
+        check(outcome != null) {
+            "awaitPageReady did not return within ${JOIN_WAIT_MS}ms for page ${view.currentPageId}"
+        }
         val ready = waitForCondition(READY_TIMEOUT_MS) {
             view.isTransformationAllowed && view.isPageDataLoaded
         }
