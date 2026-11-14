@@ -1,6 +1,7 @@
 package com.ethran.notable.editor
 
 import android.content.Context
+import android.graphics.Matrix
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.ethran.notable.SCREEN_HEIGHT
@@ -235,6 +236,90 @@ class FitModeViewportTests {
             fittedZoom(newWidth, sheetWidth), fixture.page.zoom, 0.01f,
         )
         assertEquals("and still no slack at the sides", 0f, fixture.page.scroll.x, 0.01f)
+    }
+
+    /**
+     * The re-fitted zoom has to be put on the screen canvas too, not only on the viewport.
+     *
+     * The canvas is the only thing that scales what gets drawn: [PageView]'s bitmap is blitted to
+     * the surface 1:1 by `CanvasRefreshManager.drawCanvasToView`, so a canvas left unscaled paints
+     * the sheet at 1x into a bitmap the viewport claims is fitted. Every other path that swaps in a
+     * screen bitmap re-applies the zoom to its canvas — `showPrepared`, `updateScroll`'s shift and
+     * both zoom steps — and a resize that recreates the canvas must do the same, or a rotation of a
+     * fitted notebook shows the sheet at the wrong size while `zoom` reports the fit. The viewport
+     * alone is not enough: the strokes, images and background are all drawn in page units through
+     * this canvas.
+     */
+    @Test(timeout = 60_000)
+    fun fitToWidth_reAppliesTheRefitZoomToTheScreenCanvas() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val sheetWidth = sheetWidthInPixels(PageMode.A5, context)
+        val viewWidth = (sheetWidth * 1.5f).toInt()
+        val fixture = createPageView(
+            context = context,
+            pageMode = PageMode.A5,
+            viewWidth = viewWidth,
+            viewHeight = (viewWidth * 1.4f).toInt(),
+            fitPortrait = FitMode.FIT_TO_WIDTH,
+        )
+        fixture.awaitInitialization()
+
+        val newWidth = (sheetWidth * 1.2f).toInt()
+        fixture.onMain { fixture.page.updateDimensions(newWidth, (newWidth * 1.6f).toInt()) }
+
+        val refitZoom = fittedZoom(newWidth, sheetWidth)
+        assertTrue("the resize really did change the zoom", refitZoom != 1f)
+
+        // The zoom is on the viewport…
+        assertEquals(refitZoom, fixture.page.zoom, 0.01f)
+
+        // …and it must be the transform of the canvas the page is drawn into.
+        @Suppress("DEPRECATION") // Canvas.getMatrix() is the only public way to read the transform.
+        val values = FloatArray(9).also { fixture.page.windowedCanvas.matrix.getValues(it) }
+        assertEquals(
+            "the screen canvas carries the re-fitted zoom, or the sheet is drawn at 1x",
+            refitZoom, values[Matrix.MSCALE_X], 0.01f,
+        )
+        assertEquals(
+            "on both axes",
+            refitZoom, values[Matrix.MSCALE_Y], 0.01f,
+        )
+        assertEquals(
+            "the canvas is the screen-sized one the surface blits 1:1",
+            newWidth, fixture.page.windowedBitmap.width,
+        )
+    }
+
+    /** The same for a rotation: the landscape fit is applied to the canvas, not just the viewport. */
+    @Test(timeout = 60_000)
+    fun fitToWidth_reAppliesTheZoomToTheCanvasOnARotation() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val sheetWidth = sheetWidthInPixels(PageMode.A5, context)
+        val portraitWidth = (sheetWidth * 1.5f).toInt()
+        val fixture = createPageView(
+            context = context,
+            pageMode = PageMode.A5,
+            viewWidth = portraitWidth,
+            viewHeight = (portraitWidth * 1.4f).toInt(),
+            fitPortrait = FitMode.FIT_TO_WIDTH,
+            fitLandscape = FitMode.FIT_TO_WIDTH,
+        )
+        fixture.awaitInitialization()
+
+        // A landscape view of the same page: the wider view prescribes a bigger fitted zoom.
+        val landscapeWidth = (sheetWidth * 2f).toInt()
+        val landscapeHeight = (sheetWidth * 0.8f).toInt()
+        fixture.onMain { fixture.page.updateDimensions(landscapeWidth, landscapeHeight) }
+
+        val landscapeZoom = fittedZoom(landscapeWidth, sheetWidth)
+        assertEquals(FitMode.FIT_TO_WIDTH, fixture.page.appliedFitMode.value)
+        assertEquals(landscapeZoom, fixture.page.zoom, 0.01f)
+        @Suppress("DEPRECATION") // Canvas.getMatrix() is the only public way to read the transform.
+        val values = FloatArray(9).also { fixture.page.windowedCanvas.matrix.getValues(it) }
+        assertEquals(
+            "the rotated view draws the sheet at its fitted width, not at 1x",
+            landscapeZoom, values[Matrix.MSCALE_X], 0.01f,
+        )
     }
 
     /** A REAL sheet still drops to 1x on a resize, exactly as it always did. */

@@ -1126,8 +1126,9 @@ class PageView(
         }
         // Blank at the new size, rather than read from disk on the main thread; the redraw below
         // fills it.
+        val zoom = viewportFlow.value.zoom
         windowedBitmap = createBitmap(viewWidth, viewHeight).apply { eraseColor(Color.WHITE) }
-        windowedCanvas = Canvas(windowedBitmap)
+        windowedCanvas = Canvas(windowedBitmap).apply { scale(zoom, zoom) }
         scrollBackBuffer = null
         // TODO: it might be worth to do it
         //  by redrawing only part of the screen, like in scroll and zoom.
