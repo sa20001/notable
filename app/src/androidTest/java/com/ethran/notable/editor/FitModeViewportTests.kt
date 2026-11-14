@@ -12,8 +12,10 @@ import com.ethran.notable.data.model.FitMode
 import com.ethran.notable.testing.PageViewFixture
 import com.ethran.notable.testing.TestDatabaseFactory
 import com.ethran.notable.testing.createPageViewForTest
+import com.ethran.notable.testing.XDpiOverrideRule
 import com.ethran.notable.testing.seedLooseSheetPage
 import com.ethran.notable.testing.sheetWidthInPixels
+import org.junit.Rule
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -35,6 +37,10 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class FitModeViewportTests {
+
+    @Rule
+    @JvmField
+    val xdpiOverride = XDpiOverrideRule()
 
     private lateinit var db: AppDatabase
     private val fixtures = mutableListOf<PageViewFixture>()

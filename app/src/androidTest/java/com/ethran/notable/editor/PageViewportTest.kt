@@ -12,6 +12,8 @@ import com.ethran.notable.SCREEN_WIDTH
 import com.ethran.notable.editor.canvas.CanvasEventBus
 import com.ethran.notable.testing.PageDataTestHarness
 import com.ethran.notable.testing.TestNotebookSeeder
+import com.ethran.notable.testing.XDpiOverrideRule
+import org.junit.Rule
 import com.ethran.notable.testing.movedDown
 import com.ethran.notable.testing.testImage
 import com.ethran.notable.testing.testStroke
@@ -46,6 +48,10 @@ import kotlin.math.roundToInt
  */
 @RunWith(AndroidJUnit4::class)
 class PageViewportTest {
+
+    @Rule
+    @JvmField
+    val xdpiOverride = XDpiOverrideRule()
 
     private val app: Application = ApplicationProvider.getApplicationContext()
     private lateinit var data: PageDataTestHarness

@@ -31,8 +31,10 @@ import com.ethran.notable.sync.SyncOrchestrator
 import com.ethran.notable.testing.PageViewFixture
 import com.ethran.notable.testing.TestDatabaseFactory
 import com.ethran.notable.testing.createPageViewForTest
+import com.ethran.notable.testing.XDpiOverrideRule
 import com.ethran.notable.testing.seedLooseSheetPage
 import com.ethran.notable.testing.sheetWidthInPixels
+import org.junit.Rule
 import com.ethran.notable.ui.SnackDispatcher
 import com.ethran.notable.utils.AppResult
 import io.mockk.mockk
@@ -48,10 +50,15 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlin.math.abs
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 @RunWith(AndroidJUnit4::class)
 class EditorSimpleStateTests {
+
+    @Rule
+    @JvmField
+    val xdpiOverride = XDpiOverrideRule()
 
     private lateinit var db: AppDatabase
     private val fixtures = mutableListOf<PageViewFixture>()
@@ -157,7 +164,7 @@ class EditorSimpleStateTests {
         // The sheet is wider than the viewport: scroll x can never exceed (sheetWidth - viewWidth).
         val maxScrollX = sheetWidth - viewWidth
 
-        fixture.onMain { fixture.page.updateScroll(fixture.pageId, Offset(1000f, 0f)) }
+        fixture.onMain { fixture.page.updateScroll(fixture.pageId, dragPastTheSheetEdge(sheetWidth)) }
 
         // The delta is truncated at the bound, not discarded: the sheet's far edge ends up against
         // the viewport's far edge, and no further.
@@ -435,18 +442,32 @@ class EditorSimpleStateTests {
 
         // Panned to the bound the sheet allows at this size.
         val maxScrollX = sheetWidth - viewWidth
-        fixture.onMain { fixture.page.updateScroll(fixture.pageId, Offset(1000f, 0f)) }
+        fixture.onMain { fixture.page.updateScroll(fixture.pageId, dragPastTheSheetEdge(sheetWidth)) }
         assertEquals(maxScrollX, fixture.page.scroll.x, 0.01f)
 
-        // What closing the document does to the scroll: it gets saved.
+        // What closing the document does to the scroll: it gets saved, to the whole page pixel the
+        // column keeps. A sheet's width is a fraction of a point conversion, so the bound the view
+        // settled on is rarely a whole pixel, and what is stored is that bound rounded.
         fixture.data.pageSaver.saveAll()
+        val savedScrollX = maxScrollX.roundToInt()
+        assertEquals(savedScrollX, fixture.data.db.pageDao().getById(fixture.pageId)!!.scrollX)
 
         fixture.page.disposeOldPage()
         val reopened = fixture.newPageView()
         fixture.awaitInitialization(reopened)
+        // Rounding can carry the stored x just past the bound, and the reopened view clamps it back
+        // to it, so the page returns to the far edge to within the half pixel the rounding cost.
+        // Asserting the stored int exactly would pin which way that rounding happens to fall at this
+        // display's density, which is not what this test is about.
         assertEquals(
             "the reopened page is back at the sheet's far edge",
-            maxScrollX, reopened.viewport.value.scroll.x, 0.01f,
+            min(savedScrollX.toFloat(), maxScrollX),
+            reopened.viewport.value.scroll.x,
+            0.01f,
+        )
+        assertTrue(
+            "and no further than the sheet's edge",
+            reopened.viewport.value.scroll.x <= maxScrollX + 0.01f,
         )
     }
 
@@ -661,12 +682,16 @@ class EditorSimpleStateTests {
         )
         fixture.awaitInitialization()
 
-        // Panned to the sheet's far edge at the old size, a scroll the view does record.
-        fixture.onMain { fixture.page.updateScroll(fixture.pageId, Offset(1000f, 0f)) }
-        val pannedScrollX = (sheetWidth - viewWidth).roundToInt()
-        assertEquals(pannedScrollX.toFloat(), fixture.page.scroll.x, 0.01f)
+        // Panned to the sheet's far edge at the old size, a scroll the view does record. The clamp
+        // is the sheet over the view, which is rarely a whole pixel; only the stored value is.
+        fixture.onMain { fixture.page.updateScroll(fixture.pageId, dragPastTheSheetEdge(sheetWidth)) }
+        val pannedScrollX = sheetWidth - viewWidth
+        assertEquals(pannedScrollX, fixture.page.scroll.x, 0.01f)
         assertEquals(AppResult.Success(Unit), fixture.data.pageSaver.saveAll())
-        assertEquals(pannedScrollX, fixture.data.db.pageDao().getById(fixture.pageId)!!.scrollX)
+        assertEquals(
+            pannedScrollX.roundToInt(),
+            fixture.data.db.pageDao().getById(fixture.pageId)!!.scrollX,
+        )
 
         // A much wider view: the sheet now leaves slack, so the re-fit centres it — a different x.
         val newWidth = (sheetWidth * 2f).toInt()
@@ -682,6 +707,16 @@ class EditorSimpleStateTests {
             fixture.data.db.pageDao().getById(fixture.pageId)!!.scrollX,
         )
     }
+
+    /**
+     * A sideways drag that is always past a sheet's far edge, whatever the display's density.
+     *
+     * The bound the view clamps to is `sheetWidth - viewWidth`, and a sheet's pixel width is
+     * `points * xdpi / 72`, so the bound grows with the screen: a fixed delta that overshoots it on
+     * one display can land short of it on a denser one, and the test then measures an unclamped
+     * scroll instead of the clamp. Two sheet widths always overshoot, since the bound is under one.
+     */
+    private fun dragPastTheSheetEdge(sheetWidth: Float): Offset = Offset(sheetWidth * 2f, 0f)
 
     private fun createEditorViewModelForTest(context: Context, db: AppDatabase): EditorViewModel {
         val bookRepository = BookRepository(db.notebookDao(), db.pageDao())
