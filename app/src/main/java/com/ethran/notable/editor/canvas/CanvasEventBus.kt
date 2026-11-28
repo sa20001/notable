@@ -6,9 +6,7 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withTimeoutOrNull
@@ -55,51 +53,8 @@ object CanvasEventBus {
     // For cleaning whole page, activated from toolbar menu
     val clearPageSignal = MutableSharedFlow<Unit>()
 
-
-    // For QuickNav scrolling with previews
-
-    /** The id of the last scrub started. Main thread only. */
-    private var lastScrub = 0
-
-    /**
-     * The QuickNav scrub under way, or null. Each scrub has its own id, carried by the work queued
-     * for it (a preview, its end), so that work cannot act on a later scrub.
-     */
-    private val _activeScrub = MutableStateFlow<Int?>(null)
-    val activeScrub: StateFlow<Int?> = _activeScrub.asStateFlow()
-
-    /**
-     * Preview requests; each names the scrub it was made in. Only [requestPreview] adds them. The
-     * newest wins: a request not yet taken is replaced by a later one.
-     */
-    private val _previewPage = MutableSharedFlow<PreviewRequest>(
-        extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST
-    )
-    val previewPage: SharedFlow<PreviewRequest> = _previewPage.asSharedFlow()
-
-    /** Starts a new scrub and returns its id, for [endScrub]. Main thread. */
-    fun startScrub(): Int {
-        lastScrub++
-        _activeScrub.value = lastScrub
-        return lastScrub
-    }
-
-    /**
-     * Asks for a preview of [pageId] in the current scrub. The request keeps that scrub's id, so it
-     * is dropped if it arrives after the scrub ended. Does nothing if no scrub is under way.
-     */
-    fun requestPreview(pageId: String) {
-        activeScrub.value?.let { _previewPage.tryEmit(PreviewRequest(it, pageId)) }
-    }
-
-    /** Ends [scrub]; does nothing if it is not the scrub under way (already ended, or replaced). */
-    fun endScrub(scrub: Int) {
-        _activeScrub.compareAndSet(scrub, null)
-    }
-
-    /** [scrub] is the scrub under way: its queued work may still act. */
-    fun isCurrentScrub(scrub: Int) = activeScrub.value == scrub
-
+    /** QuickNav scrubs and their page previews. */
+    val quickNav = QuickNavScrubs()
 
     val changePage = MutableSharedFlow<String>(extraBufferCapacity = 1)
 
@@ -134,6 +89,3 @@ object CanvasEventBus {
     }
 
 }
-
-/** A QuickNav page preview asked for during [scrub]. */
-data class PreviewRequest(val scrub: Int, val pageId: String)

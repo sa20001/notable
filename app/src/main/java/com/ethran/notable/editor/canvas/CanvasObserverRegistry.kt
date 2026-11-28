@@ -292,10 +292,10 @@ class CanvasObserverRegistry(
     @OptIn(FlowPreview::class)
     private fun observeQuickNav() {
         observerScope.launch {
-            CanvasEventBus.previewPage.debounce(50).collectLatest { request ->
+            CanvasEventBus.quickNav.previews.debounce(50).collectLatest { request ->
                 // The preview belongs to the scrub it was asked for in; dropped once that is over.
                 val (scrub, pageId) = request
-                if (!CanvasEventBus.isCurrentScrub(scrub)) return@collectLatest
+                if (!CanvasEventBus.quickNav.isCurrent(scrub)) return@collectLatest
                 // Null for a loose page, or if sync has just deleted the notebook.
                 val pageNumber = page.openPage.record?.notebookId
                     ?.let { viewModel.appRepository.bookRepository.getPageIndex(it, pageId) }
@@ -318,7 +318,7 @@ class CanvasObserverRegistry(
                     return@collectLatest
                 }
 
-                if (!CanvasEventBus.isCurrentScrub(scrub)) return@collectLatest
+                if (!CanvasEventBus.quickNav.isCurrent(scrub)) return@collectLatest
                 log.d("QuickNav preview: scrub=$scrub, page=$pageId, bitmap=${previewBitmap.hashCode()}")
                 refreshManager.showPreview(scrub, previewBitmap)
             }
@@ -332,7 +332,7 @@ class CanvasObserverRegistry(
     private fun observeScrubEnd() {
         observerScope.launch {
             var current: Int? = null
-            CanvasEventBus.activeScrub.collect { scrub ->
+            CanvasEventBus.quickNav.active.collect { scrub ->
                 val ended = current
                 current = scrub
                 if (ended != null) { // a StateFlow never repeats a value: this one ended

@@ -2,6 +2,7 @@ package com.ethran.notable.editor.canvas
 
 import android.graphics.Bitmap
 import android.graphics.Rect
+import androidx.annotation.MainThread
 import com.ethran.notable.editor.PageView
 import com.ethran.notable.editor.utils.refreshScreenRegion
 import com.ethran.notable.utils.checkMainThread
@@ -41,7 +42,7 @@ class CanvasRefreshManager(
      */
     fun showPreview(scrub: Int, preview: Bitmap) {
         drawCanvas.post {
-            if (!CanvasEventBus.isCurrentScrub(scrub)) {
+            if (!CanvasEventBus.quickNav.isCurrent(scrub)) {
                 log.d("QuickNav preview of scrub $scrub dropped: the scrub is over")
                 return@post
             }
@@ -63,9 +64,10 @@ class CanvasRefreshManager(
     private fun fullScreen() = Rect(0, 0, page.viewWidth, page.viewHeight)
 
     /**
-     * Commits an erase over [dirtyRect] (see [RawDrawingController.commitErase]). Main thread;
-     * call after the page bitmap is repainted (after handleErase / handleScribbleToErase).
+     * Commits an erase over [dirtyRect] (see [RawDrawingController.commitErase]). Call after the
+     * page bitmap is repainted (after handleErase / handleScribbleToErase).
      */
+    @MainThread
     fun commitErase(dirtyRect: Rect, areaErase: Boolean) {
         checkMainThread("CanvasRefreshManager.commitErase")
         rawDrawing.commitErase(dirtyRect.toScreenArea(), areaErase)

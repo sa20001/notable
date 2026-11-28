@@ -1,12 +1,12 @@
 package com.ethran.notable.editor.canvas
 
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -19,62 +19,66 @@ import org.junit.Test
  * belongs to that scrub, and cannot act on the next one.
  */
 class QuickNavScrubTest {
+    private var threadChecks = 0
+    private val scrubs = QuickNavScrubs(checkThread = { threadChecks++ })
 
-    @After
-    fun noScrubLeft() {
-        CanvasEventBus.activeScrub.value?.let(CanvasEventBus::endScrub)
+    /** Listens for the next preview request; a request sent with nobody listening is dropped. */
+    private fun CoroutineScope.nextPreview(
+        timeoutMillis: Long = 1000,
+    ): Deferred<PreviewRequest?> = async(start = CoroutineStart.UNDISPATCHED) {
+        withTimeoutOrNull(timeoutMillis) { scrubs.previews.first() }
     }
 
     @Test
     fun aPreviewRequestKeepsTheScrubItWasMadeIn() = runBlocking {
-        val scrubA = CanvasEventBus.startScrub()
-        // Listening before the request: a request nobody collects is dropped.
-        val sent = async(start = CoroutineStart.UNDISPATCHED) {
-            withTimeout(1000) { CanvasEventBus.previewPage.first() }
-        }
-        CanvasEventBus.requestPreview("page-1")
-        CanvasEventBus.startScrub() // scrub B starts while A's request waits out the debounce
+        val scrubA = scrubs.start()
+        val sent = nextPreview()
+        scrubs.requestPreview("page-1")
+        scrubs.start() // scrub B starts while A's request waits out the debounce
         val request = sent.await()
         assertEquals(PreviewRequest(scrubA, "page-1"), request)
-        assertFalse("A's preview is dropped in B", CanvasEventBus.isCurrentScrub(request.scrub))
+        assertFalse("A's preview is dropped in B", scrubs.isCurrent(scrubA))
     }
 
     @Test
     fun aRequestOfTheScrubUnderWayIsShown() = runBlocking {
-        CanvasEventBus.startScrub()
-        val sent = async(start = CoroutineStart.UNDISPATCHED) {
-            withTimeout(1000) { CanvasEventBus.previewPage.first() }
-        }
-        CanvasEventBus.requestPreview("page-1")
-        assertTrue(CanvasEventBus.isCurrentScrub(sent.await().scrub))
+        val scrub = scrubs.start()
+        val sent = nextPreview()
+        scrubs.requestPreview("page-1")
+        assertEquals(PreviewRequest(scrub, "page-1"), sent.await())
+        assertTrue(scrubs.isCurrent(scrub))
     }
 
     @Test
     fun noRequestWithoutAScrub() = runBlocking {
-        CanvasEventBus.endScrub(CanvasEventBus.startScrub())
-        val sent = async(start = CoroutineStart.UNDISPATCHED) {
-            withTimeoutOrNull(100) { CanvasEventBus.previewPage.first() }
-        }
-        CanvasEventBus.requestPreview("page-1")
+        scrubs.end(scrubs.start())
+        val sent = nextPreview(timeoutMillis = 100)
+        scrubs.requestPreview("page-1")
         assertNull(sent.await())
     }
 
     @Test
     fun everyScrubHasItsOwnId() {
-        val first = CanvasEventBus.startScrub()
-        CanvasEventBus.endScrub(first)
-        val second = CanvasEventBus.startScrub()
+        val first = scrubs.start()
+        scrubs.end(first)
+        val second = scrubs.start()
         assertNotEquals(first, second)
-        assertEquals(second, CanvasEventBus.activeScrub.value)
+        assertEquals(second, scrubs.active.value)
     }
 
     @Test
     fun aLateEndOfAnEarlierScrubLeavesTheCurrentOne() {
-        val first = CanvasEventBus.startScrub()
-        val second = CanvasEventBus.startScrub()
-        CanvasEventBus.endScrub(first) // e.g. an abandoned gesture's cleanup, run late
-        assertEquals(second, CanvasEventBus.activeScrub.value)
-        CanvasEventBus.endScrub(second)
-        assertNull(CanvasEventBus.activeScrub.value)
+        val first = scrubs.start()
+        val second = scrubs.start()
+        scrubs.end(first) // e.g. an abandoned gesture's cleanup, run late
+        assertEquals(second, scrubs.active.value)
+        scrubs.end(second)
+        assertNull(scrubs.active.value)
+    }
+
+    @Test
+    fun startingAScrubChecksTheThread() {
+        scrubs.start()
+        assertEquals(1, threadChecks)
     }
 }

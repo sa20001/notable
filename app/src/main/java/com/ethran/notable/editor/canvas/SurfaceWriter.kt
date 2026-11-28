@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.os.SystemClock
+import androidx.annotation.MainThread
 import com.ethran.notable.data.datastore.GlobalAppSettings
 import com.ethran.notable.data.model.SimplePointF
 import com.ethran.notable.editor.EditorViewModel
@@ -39,8 +40,9 @@ class SurfaceWriter(
      * (null: the page, with the page-cut line in Select mode) there, and posts it. With [force],
      * the post is forced through to the panel while raw drawing still owns the screen. Returns
      * whether the requested content was drawn and posted (false when the lock, the draw or the
-     * post failed). Main thread only.
+     * post failed).
      */
+    @MainThread
     fun write(dirtyRect: Rect?, bitmap: Bitmap?, force: Boolean): Boolean {
         checkMainThread("SurfaceWriter.write")
         val zoneToRedraw = dirtyRect ?: Rect(0, 0, page.viewWidth, page.viewHeight)

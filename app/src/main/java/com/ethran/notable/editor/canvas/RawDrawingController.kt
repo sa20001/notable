@@ -1,6 +1,7 @@
 package com.ethran.notable.editor.canvas
 
 import android.os.SystemClock
+import androidx.annotation.MainThread
 import com.ethran.notable.utils.checkMainThread
 import io.shipbook.shipbooksdk.ShipBook
 import kotlinx.coroutines.CoroutineScope
@@ -32,13 +33,14 @@ private const val RECOVERY_ATTEMPTS = 5
  *   [RECOVERY_ATTEMPTS] times, then the pen comes back anyway. A new surface, a new preview owner
  *   and the end of a preview start a fresh run of retries. A post after a failure settles like a
  *   write under the pen.
- * - Without a session nothing is written; a new session shows the whole page. Main thread only.
+ * - Without a session nothing is written; a new session shows the whole page.
  *
  * @param drawingWanted whether the user wants the pen to draw now (`ToolbarUiState.isDrawing`).
  * @param configurePen eraser channel and pen style; run after every [PenDevice.resetPenDefaults].
  * @param postToSurface draws an area (null: all) of the page or a preview and posts it; returns
  *   whether it was posted. Forced: the post reaches the panel while raw drawing owns the screen.
  */
+@MainThread
 class RawDrawingController<P : Any>(
     private val pen: PenDevice,
     private val drawingWanted: () -> Boolean,

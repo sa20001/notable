@@ -58,7 +58,7 @@ class QuickNavViewModel(
     val uiState: StateFlow<QuickNavUiState> = _uiState.asStateFlow()
     private var lastScrubEndTargetPageId: String? = null
 
-    /** The id of this scrubber's last scrub ([CanvasEventBus.startScrub]); null before the first. */
+    /** The id of this scrubber's last scrub ([CanvasEventBus.quickNav]); null before the first. */
     private var scrub: Int? = null
 
     private var loadJob: Job? = null
@@ -131,18 +131,18 @@ class QuickNavViewModel(
     fun onScrubStart() {
         lastScrubEndTargetPageId = null
         // Now, not in a coroutine: previews requested from here on belong to this scrub.
-        scrub = CanvasEventBus.startScrub()
+        scrub = CanvasEventBus.quickNav.start()
     }
 
     /** The gesture was abandoned (the scrubber left the screen mid-drag): end it, change nothing. */
     fun onScrubAbandoned() {
-        scrub?.let(CanvasEventBus::endScrub)
+        scrub?.let(CanvasEventBus.quickNav::end)
     }
 
     fun onScrubPreview(index: Int) {
         val pageId = _uiState.value.scrubber?.pageAt(index) ?: return
         // Taken now, not in a coroutine: the request keeps the scrub it was made in.
-        CanvasEventBus.requestPreview(pageId)
+        CanvasEventBus.quickNav.requestPreview(pageId)
     }
 
     fun onScrubEnd(index: Int) {
@@ -151,7 +151,7 @@ class QuickNavViewModel(
 
         viewModelScope.launch {
             // Ends the preview: the canvas shows its page again (CanvasObserverRegistry).
-            ended?.let(CanvasEventBus::endScrub)
+            ended?.let(CanvasEventBus.quickNav::end)
             if (targetPageId == null) return@launch // nothing to commit
 
             log.v("onScrubEnd: $index")

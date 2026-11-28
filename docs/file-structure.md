@@ -33,6 +33,7 @@ com.ethran.notable/
         - CanvasRefreshManager.kt — Hands the editor's redraw and preview requests to the controller.
         - CanvasObserverRegistry.kt — The flows the canvas reacts to (ViewModel state, CanvasEventBus).
         - CanvasEventBus.kt — App-wide canvas signals (redraw, refresh, resumed/focus state).
+        - QuickNavScrubs.kt — QuickNav scrubs and their page previews; each scrub has its own id (`CanvasEventBus.quickNav`).
     - drawing/ — Rendering: page drawing (pageDrawing.kt), backgrounds (backgrounds.kt), dry-stroke renderers (StrokeRenderer.kt, AppStrokeRenderer.kt, onyx/ with the Onyx pen wrappers), pen styles (StrokeStyleRegistry.kt, penStrokes.kt), OpenGLRenderer/LineRenderer (front-buffered drawing on non-Onyx devices).
     - state/ — Editor-specific state management:
         - History.kt — Undo/Redo logic, per page.
