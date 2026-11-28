@@ -12,9 +12,9 @@ import androidx.room.Query
 import androidx.room.Update
 import com.ethran.notable.data.model.BackgroundType
 import com.ethran.notable.data.model.SheetSize
+import com.ethran.notable.io.canonicalPath
 import io.shipbook.shipbooksdk.ShipBook
 import kotlinx.coroutines.flow.Flow
-import java.io.File
 import java.util.Date
 import java.util.UUID
 import javax.inject.Inject
@@ -177,9 +177,6 @@ class BookRepository @Inject constructor(
             .filter { canonicalPath(it.defaultBackground) == target }
             .maxByOrNull { it.updatedAt }
     }
-
-    private fun canonicalPath(path: String): String =
-        runCatching { File(path).canonicalPath }.getOrDefault(path)
 
     /** Advances the edit timestamp of the notebook holding [pageId]; no-op for a loose page. */
     suspend fun touchUpdatedAtForPage(pageId: String, updatedAt: Date = Date()) {

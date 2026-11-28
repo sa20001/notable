@@ -217,7 +217,13 @@ class ImportEngine @Inject constructor(
             }
         }
 
-        return persistentError?.let { AppResult.Error(it) } ?: AppResult.Success(importedPageIds)
+        persistentError?.let {
+            // A notebook missing pages would be found by later links to the file, and a retry
+            // would open it instead of importing again. Its pages go with it.
+            bookRepo.delete(book.id)
+            return AppResult.Error(it)
+        }
+        return AppResult.Success(importedPageIds)
     }
 
 

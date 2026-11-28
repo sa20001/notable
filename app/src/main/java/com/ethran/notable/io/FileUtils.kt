@@ -224,6 +224,10 @@ fun copyStreamToFile(inputStream: InputStream, outputFile: File) {
     }
 }
 
+/** [path] resolved, so `/sdcard/…` and `/storage/emulated/0/…` name a file the same way. */
+fun canonicalPath(path: String): String =
+    runCatching { File(path).canonicalPath }.getOrDefault(path)
+
 fun getPdfPageCount(uri: String): Int {
     if (uri.isEmpty()) {
         fileUtilsLog.w("getPdfPageCount: Empty URI")

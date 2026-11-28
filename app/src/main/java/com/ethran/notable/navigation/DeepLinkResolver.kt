@@ -9,17 +9,23 @@ import com.ethran.notable.editor.utils.PreviewSaveMode
 import com.ethran.notable.io.ImportEngine
 import com.ethran.notable.io.ImportOptions
 import com.ethran.notable.io.ThumbnailBackfillQueue
+import com.ethran.notable.io.canonicalPath
 import com.ethran.notable.io.getPdfPageCount
 import com.ethran.notable.io.renderPdfPageAndroid
+import com.ethran.notable.utils.AppResult
+import com.ethran.notable.utils.DomainError
 import com.ethran.notable.utils.fold
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
+import javax.inject.Singleton
 
 /** Finds what a [DeepLink] points at in the database, and imports the PDF of a [DeepLink.Pdf]. */
+@Singleton
 class DeepLinkResolver @Inject constructor(
     private val appRepository: AppRepository,
     private val importEngine: ImportEngine,
@@ -47,6 +53,8 @@ class DeepLinkResolver @Inject constructor(
                 ?: Target.Failed("Notebook not found")
 
             is DeepLink.Pdf -> {
+                // While the file is imported its notebook is still missing pages: wait for it.
+                runningImport(link.path)?.let { return@withContext opened(it.await(), link.page) }
                 val book = appRepository.bookRepository.getLinkedToPdf(link.path)
                 when {
                     book != null -> openBook(book, link.page)
@@ -57,28 +65,57 @@ class DeepLinkResolver @Inject constructor(
         }
     }
 
+    /** Imports under way, by canonical PDF path. Guarded by itself. */
+    private val imports = mutableMapOf<String, Deferred<AppResult<Notebook, DomainError>>>()
+
     /**
      * Imports the PDF into the library, observing the file where it is, so the notebook shows its
-     * changes and later links find it. Runs on the application scope, so recreating the activity
-     * doesn't stop it halfway.
+     * changes and later links find it. Callers for one file share one import, and each opens its
+     * own page. Runs on the application scope, so recreating the activity doesn't stop it halfway.
      */
-    suspend fun import(link: DeepLink.Pdf): Target = applicationScope.async(Dispatchers.IO) {
-        val result = importEngine.import(
-            Uri.fromFile(File(link.path)),
+    suspend fun import(link: DeepLink.Pdf): Target = opened(sharedImport(link.path).await(), link.page)
+
+    private fun runningImport(path: String) = synchronized(imports) { imports[canonicalPath(path)] }
+
+    private fun sharedImport(path: String) = synchronized(imports) {
+        val key = canonicalPath(path)
+        imports.getOrPut(key) {
+            // The body removes the entry only after this block has added it: it takes the lock.
+            applicationScope.async(Dispatchers.IO) {
+                try {
+                    importFollowing(path)
+                } finally {
+                    synchronized(imports) { imports.remove(key) }
+                }
+            }
+        }
+    }
+
+    /** The notebook following the PDF at [path], imported unless one already follows it. */
+    private suspend fun importFollowing(path: String): AppResult<Notebook, DomainError> {
+        // E.g. made by the PDF receiver while the import dialog was open.
+        appRepository.bookRepository.getLinkedToPdf(path)?.let { return AppResult.Success(it) }
+        return when (val result = importEngine.import(
+            Uri.fromFile(File(path)),
             ImportOptions(linkToExternalFile = true)
-        )
-        result.fold(
-            onSuccess = { pageIds ->
-                thumbnailBackfillQueue.enqueue(pageIds, PreviewSaveMode.STRICT_BW)
-                val book = pageIds.firstOrNull()
+        )) {
+            is AppResult.Error -> result
+            is AppResult.Success -> {
+                thumbnailBackfillQueue.enqueue(result.data, PreviewSaveMode.STRICT_BW)
+                result.data.firstOrNull()
                     ?.let { appRepository.pageRepository.getById(it)?.notebookId }
                     ?.let { appRepository.bookRepository.getById(it) }
-                    ?: return@fold Target.Failed("Imported notebook not found")
-                openBook(book, link.page)
-            },
-            onError = { Target.Failed("Import failed: ${it.userMessage}") }
+                    ?.let { AppResult.Success(it) }
+                    ?: AppResult.Error(DomainError.NotFound("Imported notebook"))
+            }
+        }
+    }
+
+    private fun opened(imported: AppResult<Notebook, DomainError>, page: Int?): Target =
+        imported.fold(
+            onSuccess = { openBook(it, page) },
+            onError = { Target.Failed("Import failed: ${it.userMessage}") },
         )
-    }.await()
 
     /** What the import dialog shows of the PDF of [link]. */
     suspend fun preview(link: DeepLink.Pdf): PdfPreview = withContext(Dispatchers.IO) {
