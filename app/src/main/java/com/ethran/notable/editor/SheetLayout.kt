@@ -87,5 +87,8 @@ fun openingViewport(
     viewWidth: Int,
     viewHeight: Int,
 ): PageViewport =
-    if (left != null && left.viewWidth == viewWidth && left.viewHeight == viewHeight) left.viewport
+    if (left != null && left.viewWidth == viewWidth && left.viewHeight == viewHeight) {
+        // Fitted all the same, in case the page's sheet changed since, as a sync download may.
+        fittedToSheet(left.viewport, sheet, viewWidth, viewHeight)
+    }
     else framedOnSheet(PageViewport(left?.viewport?.scroll ?: saved, zoom), sheet, viewWidth, viewHeight)

@@ -515,6 +515,9 @@ class PageView(
             context = context,
             pageID = page.pageId,
             viewport = viewport,
+            sheet = page.sheet,
+            viewWidth = canvas.width,
+            viewHeight = canvas.height,
             pageUpdatedAtMs = page.record?.updatedAt?.time,
         )
         if (bitmapFromDisc != null) {
@@ -670,7 +673,7 @@ class PageView(
         // so we have to scale it back to page coordinates.
         val deltaInPage = Offset(dragDelta.x / start.zoom, dragDelta.y / start.zoom)
 
-        // The drag is cut to what the sheet allows: zero on a centred sheet, which cannot move sideways.
+        // The drag is cut to what the sheet allows: half a view past its edges at most.
         val next = commitViewport(pageId, start.copy(scroll = start.scroll + deltaInPage)) ?: return
         val movement = (next.scroll - start.scroll) * start.zoom
         if (movement.toIntOffset() == IntOffset.Zero) return

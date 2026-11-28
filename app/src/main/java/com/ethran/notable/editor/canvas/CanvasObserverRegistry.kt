@@ -56,7 +56,7 @@ class CanvasObserverRegistry(
         private var activeObserverJob: Job? = null
 
         // How long the sheet's area on the screen stays put before the pen session follows.
-        private const val STRIP_SETTLE_MS = 150L
+        private const val SHEET_AREA_SETTLE_MS = 150L
     }
 
     fun registerAll() {
@@ -181,7 +181,7 @@ class CanvasObserverRegistry(
         // milliseconds.
         observerScope.launch {
             page.viewport.map { sheetAreaFor(page.sheet, it, page.viewWidth, page.viewHeight) }
-                .distinctUntilChanged().drop(1).debounce(STRIP_SETTLE_MS).collect { area ->
+                .distinctUntilChanged().drop(1).debounce(SHEET_AREA_SETTLE_MS).collect { area ->
                     log.v("sheet now at $area on the screen")
                     inputHandler.updateActiveSurface()
                 }

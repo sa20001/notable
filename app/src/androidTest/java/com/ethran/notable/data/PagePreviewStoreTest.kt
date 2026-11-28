@@ -56,7 +56,7 @@ class PagePreviewStoreTest {
     // The preview of [pageId] at the top of the page, if it is on disk and not older than
     // [updatedAtMs].
     private fun preview(pageId: String, updatedAtMs: Long? = null) =
-        loadHQPagePreview(app, pageId, PageViewport(), pageUpdatedAtMs = updatedAtMs)
+        loadHQPagePreview(app, pageId, PageViewport(), sheet = null, viewWidth = 0, viewHeight = 0, pageUpdatedAtMs = updatedAtMs)
 
     // Opens an editor view on [pageId], waits until the page is loaded, lets [edit] change it, and
     // closes the view and its scope, as closing the editor does.

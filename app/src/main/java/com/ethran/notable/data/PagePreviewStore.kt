@@ -70,10 +70,13 @@ class PagePreviewStore @Inject constructor(
         // Off the shelf, the bitmap is drawn into no more: it shows the page as it is now.
         val capturedAtMs = System.currentTimeMillis()
         try {
-            if (canSavePreview(viewport)) {
+            val sheet = appRepository.pageRepository.getById(pageId)?.sheet
+            if (canSavePreview(viewport, sheet, bitmap.width, bitmap.height)) {
                 saveHQPagePreview(context, bitmap, pageId, viewport, capturedAtMs)
                 savePageThumbnail(context, bitmap, pageId, capturedAtMs = capturedAtMs)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             log.e("Writing the preview of page $pageId failed: ${e.message}", e)
         } finally {

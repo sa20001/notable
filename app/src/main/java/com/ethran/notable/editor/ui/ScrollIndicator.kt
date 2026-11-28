@@ -25,7 +25,8 @@ import kotlin.math.max
 
 /**
  * Vertical scroll indicator (right side).
- * Uses the vertical scroll of [PageView.viewport] and the sheet's height, or [PageView.contentHeight] on a page without one.
+ * Shows the part of the sheet on the screen, or, on a page without one, the vertical scroll of
+ * [PageView.viewport] against [PageView.contentHeight].
  */
 @Composable
 fun ScrollIndicator(viewModel: EditorViewModel, page: PageView) {
@@ -40,17 +41,14 @@ fun ScrollIndicator(viewModel: EditorViewModel, page: PageView) {
         val viewportHeightPx = convertDpToPixel(this.maxHeight, LocalContext.current).toInt()
         val scrollY = viewport.scroll.y
 
-        // A page with a sheet is the sheet, in page pixels. Otherwise an approximation:
-        // contentHeight is the total content height (page coordinates)
-        // scrollY + viewportHeightPx ensures indicator still shows while near bottom
-        val sheet = page.sheet
-        val visibleHeight = if (sheet != null) viewportHeightPx / viewport.zoom else viewportHeightPx.toFloat()
-        val virtualHeight = sheet?.height?.toFloat()
-            ?: max(contentHeight, scrollY.toInt() + viewportHeightPx).toFloat()
-        if (virtualHeight <= visibleHeight) return@BoxWithConstraints
-
-        val indicatorSizeDp = (visibleHeight / virtualHeight) * this.maxHeight.value
-        val indicatorPositionDp = (scrollY / virtualHeight) * this.maxHeight.value
+        // Without a sheet, an approximation: contentHeight is the total content height (page
+        // coordinates), and scrollY + viewportHeightPx keeps the indicator showing near the bottom.
+        val bar = barAlong(
+            page.sheet?.height, max(contentHeight, scrollY.toInt() + viewportHeightPx).toFloat(),
+            viewportHeightPx, scrollY, viewport.zoom,
+        ) ?: return@BoxWithConstraints
+        val indicatorSizeDp = (bar.endInclusive - bar.start) * this.maxHeight.value
+        val indicatorPositionDp = bar.start * this.maxHeight.value
 
         if (!toolbarState.isToolbarOpen) return@BoxWithConstraints
 
@@ -68,7 +66,8 @@ fun ScrollIndicator(viewModel: EditorViewModel, page: PageView) {
 
 /**
  * Horizontal scroll indicator (bottom).
- * Uses the horizontal scroll of [PageView.viewport].
+ * Shows the part of the sheet on the screen, or, on a page without one, the horizontal scroll of
+ * [PageView.viewport].
  */
 @Composable
 fun HorizontalScrollIndicator(viewModel: EditorViewModel, page: PageView) {
@@ -84,14 +83,14 @@ fun HorizontalScrollIndicator(viewModel: EditorViewModel, page: PageView) {
             val viewportWidthPx = convertDpToPixel(this.maxWidth, LocalContext.current).toInt()
             val scrollX = viewport.scroll.x
 
-            // Total scrollable width approximation:
-            // page.viewWidth is the total content width (page coordinates)
-            // scrollX + viewportWidthPx ensures indicator still shows while near right edge
-            val virtualWidth = max(page.viewWidth, scrollX.toInt() + viewportWidthPx)
-            if (virtualWidth <= viewportWidthPx) return@BoxWithConstraints
-
-            val indicatorSizeDp = (viewportWidthPx / virtualWidth.toFloat()) * this.maxWidth.value
-            val indicatorPositionDp = (scrollX / virtualWidth.toFloat()) * this.maxWidth.value
+            // Without a sheet, an approximation: page.viewWidth is the total content width (page
+            // coordinates), and scrollX + viewportWidthPx keeps the indicator showing near the edge.
+            val bar = barAlong(
+                page.sheet?.width, max(page.viewWidth, scrollX.toInt() + viewportWidthPx).toFloat(),
+                viewportWidthPx, scrollX, viewport.zoom,
+            ) ?: return@BoxWithConstraints
+            val indicatorSizeDp = (bar.endInclusive - bar.start) * this.maxWidth.value
+            val indicatorPositionDp = bar.start * this.maxWidth.value
 
             if (!toolbarState.isToolbarOpen) return@BoxWithConstraints
 
@@ -106,4 +105,18 @@ fun HorizontalScrollIndicator(viewModel: EditorViewModel, page: PageView) {
             )
         }
     }
+}
+
+/**
+ * Which part of the page the view shows along one axis, as fractions of the track; null when it
+ * shows all of it. On a page with a sheet [sheetLength] long, the part of the sheet on the screen,
+ * from [scroll] over [viewLength] screen pixels at [zoom]; otherwise the view's [viewLength] from
+ * [scroll] in [total].
+ */
+private fun barAlong(sheetLength: Int?, total: Float, viewLength: Int, scroll: Float, zoom: Float): ClosedFloatingPointRange<Float>? {
+    val length = sheetLength?.toFloat() ?: total
+    val from = if (sheetLength != null) scroll.coerceAtLeast(0f) else scroll
+    val to = if (sheetLength != null) (scroll + viewLength / zoom).coerceAtMost(length) else scroll + viewLength
+    if (from <= 0f && to >= length) return null
+    return from / length..to / length
 }

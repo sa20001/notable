@@ -87,7 +87,7 @@ class SheetLayoutTest {
 
     @Test
     fun aPageComesBackAsItWasLeft_atTheSameViewSize() {
-        val left = LeftViewport(PageViewport(Offset(-500f, -300f), 2f), viewWidth, viewHeight)
+        val left = LeftViewport(PageViewport(Offset(-300f, -300f), 2f), viewWidth, viewHeight)
         assertEquals(left.viewport, openingViewport(left, Offset.Zero, 1f, wide, viewWidth, viewHeight))
     }
 

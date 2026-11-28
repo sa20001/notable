@@ -14,7 +14,9 @@ import androidx.core.content.FileProvider
 import androidx.core.graphics.createBitmap
 import androidx.core.graphics.scale
 import com.ethran.notable.R
+import com.ethran.notable.data.model.SheetSize
 import com.ethran.notable.editor.PageViewport
+import com.ethran.notable.editor.framedOnSheet
 import com.ethran.notable.utils.ensureNotMainThread
 import io.shipbook.shipbooksdk.ShipBook
 import kotlinx.coroutines.Dispatchers
@@ -108,9 +110,17 @@ fun deletePagePreviews(filesDir: File, pageID: String) {
 
 private fun isEqApprox(a: Float, b: Float): Boolean = abs(a - b) <= EQUALITY_THRESHOLD
 
-/** Whether a view at [viewport] makes the page's preview: unzoomed, at the page's left edge. */
-fun canSavePreview(viewport: PageViewport): Boolean =
-    isEqApprox(viewport.zoom, 1f) && isEqApprox(viewport.scroll.x, 0f)
+/**
+ * Whether a view [viewWidth] x [viewHeight] at [viewport] makes the page's preview: unzoomed, where
+ * the page opens. That is its left edge, or, on a page with a [sheet], the sheet framed
+ * ([framedOnSheet]).
+ */
+fun canSavePreview(viewport: PageViewport, sheet: SheetSize?, viewWidth: Int, viewHeight: Int): Boolean {
+    if (!isEqApprox(viewport.zoom, 1f)) return false
+    if (sheet == null) return isEqApprox(viewport.scroll.x, 0f)
+    val framed = framedOnSheet(viewport, sheet, viewWidth, viewHeight).scroll
+    return isEqApprox(viewport.scroll.x, framed.x) && isEqApprox(viewport.scroll.y, framed.y)
+}
 
 private fun isCacheFresh(file: File, pageUpdatedAtMs: Long?): Boolean {
     return pageUpdatedAtMs == null || pageUpdatedAtMs <= 0 || file.lastModified() >= pageUpdatedAtMs
@@ -148,13 +158,12 @@ private fun writeWebp(file: File, optimized: StorageOptimization, capturedAtMs: 
 
 /**
  * Saves [bitmap], the view of [pageID] at [viewport] as it was at [capturedAtMs], as the page's
- * preview in place of the ones captured at other scrolls, if [canSavePreview].
+ * preview in place of the ones captured at other scrolls. The caller checks [canSavePreview].
  */
 fun saveHQPagePreview(
     context: Context, bitmap: Bitmap, pageID: String, viewport: PageViewport, capturedAtMs: Long
 ) {
     ensureNotMainThread("saveHQPagePreview")
-    if (!canSavePreview(viewport)) return
 
     val dir = previewsDir(context.filesDir).apply { mkdirs() }
     val fileName = previewFileName(pageID, viewport)
@@ -169,14 +178,20 @@ fun saveHQPagePreview(
     }
 }
 
-/** [pageID]'s preview captured at [viewport], if there is one and it is newer than [pageUpdatedAtMs]. */
+/**
+ * [pageID]'s preview captured at [viewport], if a view of it there makes one ([canSavePreview]), it
+ * exists, and it is newer than [pageUpdatedAtMs].
+ */
 fun loadHQPagePreview(
     context: Context,
     pageID: String,
     viewport: PageViewport,
+    sheet: SheetSize?,
+    viewWidth: Int,
+    viewHeight: Int,
     pageUpdatedAtMs: Long?,
 ): Bitmap? {
-    if (!canSavePreview(viewport)) return null
+    if (!canSavePreview(viewport, sheet, viewWidth, viewHeight)) return null
     val file = File(previewsDir(context.filesDir), previewFileName(pageID, viewport))
     if (!file.exists()) {
         log.i("loadHQPagePreview: no preview ${file.name}")
