@@ -89,11 +89,8 @@ object CanvasEventBus {
      * is dropped if it arrives after the scrub ended. Does nothing if no scrub is under way.
      */
     fun requestPreview(pageId: String) {
-        previewRequest(pageId)?.let { _previewPage.tryEmit(it) }
+        activeScrub.value?.let { _previewPage.tryEmit(PreviewRequest(it, pageId)) }
     }
-
-    internal fun previewRequest(pageId: String): PreviewRequest? =
-        activeScrub.value?.let { PreviewRequest(it, pageId) }
 
     /** Ends [scrub]; does nothing if it is not the scrub under way (already ended, or replaced). */
     fun endScrub(scrub: Int) {

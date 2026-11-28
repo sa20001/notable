@@ -79,7 +79,7 @@ class PageView(
     - **Scroll and zoom.** `viewport` is a `StateFlow<PageViewport>` (`scroll`, `zoom`) of the shown page; `scroll` and `zoom` read its current value. Pages left in this editor keep their viewport and get it back when shown again; a page shown for the first time opens unzoomed at its saved vertical scroll. Pages are read off the main thread and swapped in on it, together with their viewport and screen bitmap; scroll and zoom steps run there too, each for the page its gesture was made on, and a step for a page no longer shown is dropped.
     - **Content height.** `contentHeight` is a `StateFlow<Int>` with the bottom of the page's strokes and images, for the scroll indicator.
     - **Editing.** Adds, updates and removes strokes and images of the shown page through `PageDataManager`, always naming the page id.
-    - **Coordinates.** Translates between screen and page coordinates using the viewport.
+    - **Coordinates.** There are two systems. *Page coordinates* are pixels of the page at zoom 1, from its top left corner; everything stored (strokes, images, the saved scroll) uses them. *Screen coordinates* are pixels of the drawing surface (`DrawCanvas`), from the view's top left corner; touch and pen input, the screen bitmap, surface posts and the raw-drawing area use them. `PageViewport` converts: screen = (page - `scroll`) * `zoom`, where `scroll` is the page point shown at the view's top left. `toScreenCoordinates` and `toPageCoordinates` apply the current viewport.
     - Provides the screen bitmap (`windowedBitmap`) that the drawing surface (`DrawCanvas`) shows.
 
 ---

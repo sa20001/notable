@@ -1,5 +1,11 @@
 package com.ethran.notable.editor.canvas
 
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -20,26 +26,37 @@ class QuickNavScrubTest {
     }
 
     @Test
-    fun aPreviewRequestKeepsTheScrubItWasMadeIn() {
-        CanvasEventBus.startScrub()
-        val scrubA = CanvasEventBus.activeScrub.value!!
-        val request = CanvasEventBus.previewRequest("page-1")!!
+    fun aPreviewRequestKeepsTheScrubItWasMadeIn() = runBlocking {
+        val scrubA = CanvasEventBus.startScrub()
+        // Listening before the request: a request nobody collects is dropped.
+        val sent = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeout(1000) { CanvasEventBus.previewPage.first() }
+        }
+        CanvasEventBus.requestPreview("page-1")
         CanvasEventBus.startScrub() // scrub B starts while A's request waits out the debounce
-        assertEquals(scrubA, request.scrub)
+        val request = sent.await()
+        assertEquals(PreviewRequest(scrubA, "page-1"), request)
         assertFalse("A's preview is dropped in B", CanvasEventBus.isCurrentScrub(request.scrub))
     }
 
     @Test
-    fun aRequestOfTheScrubUnderWayIsShown() {
+    fun aRequestOfTheScrubUnderWayIsShown() = runBlocking {
         CanvasEventBus.startScrub()
-        val request = CanvasEventBus.previewRequest("page-1")!!
-        assertTrue(CanvasEventBus.isCurrentScrub(request.scrub))
+        val sent = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeout(1000) { CanvasEventBus.previewPage.first() }
+        }
+        CanvasEventBus.requestPreview("page-1")
+        assertTrue(CanvasEventBus.isCurrentScrub(sent.await().scrub))
     }
 
     @Test
-    fun noRequestWithoutAScrub() {
+    fun noRequestWithoutAScrub() = runBlocking {
         CanvasEventBus.endScrub(CanvasEventBus.startScrub())
-        assertNull(CanvasEventBus.previewRequest("page-1"))
+        val sent = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeoutOrNull(100) { CanvasEventBus.previewPage.first() }
+        }
+        CanvasEventBus.requestPreview("page-1")
+        assertNull(sent.await())
     }
 
     @Test

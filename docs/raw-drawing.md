@@ -1,11 +1,11 @@
 # Raw drawing and the canvas surface
 
-**It was created by AI, and should be checked for correctness. Refer to code for actual implementation.**
+**It was created by AI, and corrected by @Ethran.**
 
 On Onyx, the app posts the editor's page bitmap to a `SurfaceView` and the
 firmware draws live pen ink on a separate layer. The order matters. On a BOOX
 Note Air 4C, restarting firmware rendering immediately after a plain post could
-hide the update. Leaving input active while firmware rendering was frozen could
+make the update invisible. Leaving input active while firmware rendering was frozen could
 also leave strokes without live ink.
 
 ## Ownership
@@ -15,9 +15,10 @@ also leave strokes without live ink.
   timer run on the main thread. Start at `applyState()` for the write and pen order.
 - `SurfaceWriter` locks, draws and posts the editor surface. `PenDevice` wraps
   the Onyx SDK. Without an Onyx pen, the controller uses `NoPenDevice` and OpenGL
-  provides live ink.
-- Call `CanvasRefreshManager.refreshUi(dirtyRect)` to request a redraw in screen
-  coordinates. Pass `null` for the whole page. `OnyxInputHandler` reports strokes
+  provides live ink (to be change later probably).
+- Call `CanvasRefreshManager.refreshUi(dirtyRect)` to request a redraw. The rect is
+  in screen coordinates (pixels of the view, after scroll and zoom; see
+  [Coordinates](editor-state-and-view.md#pageview)). Pass `null` for the whole page. `OnyxInputHandler` reports strokes
   and commits erases after updating the page bitmap.
 - Nothing else posts the surface or calls the raw-drawing SDK;
   `RawDrawingOwnershipTest` fails if something does.
@@ -27,7 +28,8 @@ also leave strokes without live ink.
 - **Page redraw.** If the pen is active, the controller freezes firmware rendering,
   posts the whole page to preserve live ink, then exits raw drawing. With drawing
   still wanted, it waits 300 ms on monochrome Onyx or 500 ms on colour Onyx before
-  enabling the pen. A first-attempt post when the pen is already off, such as after a
+  enabling the pen: the post needs that long to reach the panel, and turning raw
+  drawing on sooner loses it (measured on a BOOX). A first-attempt post when the pen is already off, such as after a
   popup closes, allows immediate enable if there is no active settle. A successful
   page post during a settle or after a failure holds the pen off for at least the
   post-settle interval.
