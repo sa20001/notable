@@ -33,6 +33,30 @@ fun fitScrollX(sheet: SheetSize?, viewWidth: Int, scrollX: Float, zoom: Float): 
     return if (slack < 0f) slack / 2f else scrollX.coerceIn(0f, slack)
 }
 
+/** A page's viewport when a view [viewWidth] x [viewHeight] left it. */
+data class LeftViewport(val viewport: PageViewport, val viewWidth: Int, val viewHeight: Int)
+
+/**
+ * The viewport a page with [sheet] opens at in a view [viewWidth] x [viewHeight]: the one it was
+ * [left] at, if left at this size; otherwise its scroll — [left]'s, or the [saved] one — at [zoom],
+ * since a zoom chosen at another size fits no page at this one. Fitted to the sheet.
+ */
+fun openingViewport(
+    left: LeftViewport?,
+    saved: Offset,
+    zoom: Float,
+    sheet: SheetSize?,
+    viewWidth: Int,
+    viewHeight: Int,
+): PageViewport {
+    val viewport = when {
+        left == null -> PageViewport(saved, zoom)
+        left.viewWidth == viewWidth && left.viewHeight == viewHeight -> left.viewport
+        else -> left.viewport.copy(zoom = zoom)
+    }
+    return fittedToSheet(viewport, sheet, viewWidth)
+}
+
 /** [viewport] moved to where a view [viewWidth] wide may show a page with [sheet]. */
 fun fittedToSheet(viewport: PageViewport, sheet: SheetSize?, viewWidth: Int): PageViewport =
     viewport.copy(

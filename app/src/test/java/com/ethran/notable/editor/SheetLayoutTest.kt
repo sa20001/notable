@@ -30,6 +30,8 @@ class SheetLayoutTest {
         assertEquals(0, sideBarWidth(SheetSize(2480, 2000), viewWidth, 1f))
         // Fitted to the width: the sheet spans the view, up to float rounding.
         assertEquals(0, sideBarWidth(SheetSize(1860, 2632), viewWidth, viewWidth / 1860f))
+        // One whose product rounds to 1403.9999, under the view width.
+        assertEquals(0, sideBarWidth(SheetSize(2101, 3000), viewWidth, viewWidth / 2101f))
         assertEquals(0, sideBarWidth(null, viewWidth, 0.5f))
     }
 
@@ -57,5 +59,37 @@ class SheetLayoutTest {
         assertEquals(PageViewport(Offset.Zero, 2f), fittedToSheet(viewport, null, viewWidth))
         val moved = PageViewport(Offset(5000f, 300f), 2f)
         assertEquals(moved, fittedToSheet(moved, null, viewWidth))
+    }
+
+    private val narrow = SheetSize(1000, 2000)
+    private val wide = SheetSize(2480, 2000)
+
+    @Test
+    fun aPageOpensAtItsSavedScroll_exceptWhereItsSheetIsCentred() {
+        assertEquals(
+            PageViewport(Offset(500f, 300f)),
+            openingViewport(null, Offset(500f, 300f), 1f, wide, viewWidth, 1872),
+        )
+        assertEquals(
+            "a saved x has no say on a centred sheet",
+            PageViewport(Offset(-202f, 300f)),
+            openingViewport(null, Offset(5000f, 300f), 1f, narrow, viewWidth, 1872),
+        )
+    }
+
+    @Test
+    fun aPageComesBackAsItWasLeft_atTheSameViewSize() {
+        val left = LeftViewport(PageViewport(Offset(100f, 300f), 2f), viewWidth, 1872)
+        assertEquals(left.viewport, openingViewport(left, Offset.Zero, 1f, wide, viewWidth, 1872))
+    }
+
+    @Test
+    fun aPageLeftAtAnotherViewSize_comesBackAtTheZoomGiven_refitted() {
+        val left = LeftViewport(PageViewport(Offset(-300f, 300f), 0.5f), 2000, 1500)
+        assertEquals(
+            "its zoom was chosen for the old size; its scroll is kept, refitted",
+            PageViewport(Offset(-202f, 300f), 1f),
+            openingViewport(left, Offset.Zero, 1f, narrow, viewWidth, 1872),
+        )
     }
 }

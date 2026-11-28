@@ -110,15 +110,6 @@ class PageView(
 
     private var loadingJob: Job? = null
 
-    /**
-     * Loads the initial page, and completes when that is done; [awaitPageReady] waits on it. This,
-     * and not [pageChangeJob], is what a wait can join: the collector runs for the view's whole life.
-     */
-    private val initialPageLoadJob: Job
-
-    /** Shows each page the editor asks for, once [initialPageLoadJob] has shown the first. */
-    private val pageChangeJob: Job
-
     @Volatile
     var windowedBitmap = createBitmap(viewWidth, viewHeight)
         private set
@@ -171,7 +162,7 @@ class PageView(
         get() = viewportFlow.value.zoom
 
     // Pages this view has shown and left, with the viewport they had. Guarded by pageLock.
-    private val leftPages = HashMap<String, PageViewport>()
+    private val leftPages = HashMap<String, LeftViewport>()
 
     val isTransformationAllowed: Boolean
         get() = openPage.isTransformationAllowed
@@ -206,28 +197,14 @@ class PageView(
 
 
     init {
-        log.i("PageView init with initial pageId: $initialPageId")
-        initialPageLoadJob = coroutineScope.launch(Dispatchers.IO) {
-            switchToPage(initialPageId)
-        }
-        // Page changes wait for the first page to be shown, so the two never switch at once, as they
-        // didn't when one coroutine did both. The collector is separate because it never finishes:
-        // joining it, as a wait for the initial load used to, would wait forever.
-        pageChangeJob = coroutineScope.launch(Dispatchers.IO) {
-            initialPageLoadJob.join()
+        coroutineScope.launch(Dispatchers.IO) {
+            log.i("PageView init with initial pageId: $initialPageId")
+            if (!switchToPage(initialPageId)) return@launch
+
             requestedPageId.collect { pageId ->
                 if (pageId != currentPageId) switchToPage(pageId)
             }
         }
-    }
-
-    /**
-     * Suspends until the initial page load, and the stroke/image load it starts, have finished.
-     * [loadingJob] is only joined if [loadPage] already started it.
-     */
-    internal suspend fun awaitPageReady() {
-        initialPageLoadJob.join()
-        loadingJob?.join()
     }
 
     /**
@@ -308,15 +285,14 @@ class PageView(
         return PreparedPage(page, viewport, shelved?.bitmap ?: newBitmap(page, viewport), shelved)
     }
 
-    private fun viewportToShow(page: OpenPage): PageViewport {
-        val kept = synchronized(pageLock) { leftPages[page.pageId] }
-        if (kept != null) return fitted(kept, page.sheet)
-        val saved = Offset(
-            (page.record?.positionX ?: 0).toFloat(),
-            (page.record?.positionY ?: 0).toFloat(),
-        )
-        return fitted(PageViewport(saved), page.sheet)
-    }
+    private fun viewportToShow(page: OpenPage): PageViewport = openingViewport(
+        left = synchronized(pageLock) { leftPages[page.pageId] },
+        saved = Offset((page.record?.positionX ?: 0).toFloat(), (page.record?.positionY ?: 0).toFloat()),
+        zoom = 1f,
+        sheet = page.sheet,
+        viewWidth = viewWidth,
+        viewHeight = viewHeight,
+    )
 
     /**
      * Shows [prepared] in place of the page shown before, in one step under the page lock. It puts
@@ -334,7 +310,7 @@ class PageView(
             if (disposed) return null
             val previous = lease
             if (previous != null) {
-                leftPages[previous.pageId] = viewportFlow.value
+                leftPages[previous.pageId] = LeftViewport(viewportFlow.value, viewWidth, viewHeight)
                 pageDataManager.onExit(previous.pageId, windowedBitmap, viewportFlow.value)
                 onPageLeft(previous.pageId)
             }
@@ -957,20 +933,14 @@ class PageView(
 
     private fun updateCanvasDimensions() {
         checkMainThread("PageView.updateDimensions")
-        // A zoom fitted to the old size does not fit the new one, on any page.
+        // A zoom fitted to the old size does not fit the new one. The shown page drops it here, the
+        // pages left before when they come back ([openingViewport]).
         synchronized(pageLock) {
             val shownSheet = openPage.sheet
             viewportFlow.update { shown -> fitted(shown.copy(zoom = 1f), shownSheet) }
-            leftPages.replaceAll { _, left -> left.copy(zoom = 1f) }
         }
         val shown = openPage
-        if (shown.record != null) {
-            val scroll = viewportFlow.value.scroll
-            pageDataManager.recordScroll(
-                shown.pageId,
-                IntOffset(scroll.x.roundToInt(), scroll.y.roundToInt()),
-            )
-        }
+        if (shown.record != null) recordScroll(shown.pageId, viewportFlow.value)
         // Blank at the new size, rather than read from disk on the main thread; the redraw below
         // fills it.
         val zoom = viewportFlow.value.zoom
@@ -1010,12 +980,16 @@ class PageView(
             if (disposed || shown.pageId != pageId || shown.record == null) return null
             fitted(target, shown.sheet).also { viewportFlow.value = it }
         }
-        pageDataManager.recordScroll(
-            pageId,
-            IntOffset(next.scroll.x.roundToInt(), next.scroll.y.roundToInt()),
-        )
+        recordScroll(pageId, next)
         return next
     }
+
+    /** Records [viewport]'s scroll as [pageId]'s, to be saved, in the whole pixels the record keeps. */
+    private fun recordScroll(pageId: String, viewport: PageViewport) =
+        pageDataManager.recordScroll(
+            pageId,
+            IntOffset(viewport.scroll.x.roundToInt(), viewport.scroll.y.roundToInt()),
+        )
 
     fun applyZoom(point: IntOffset): IntOffset {
         return point * zoom
