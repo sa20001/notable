@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
+import androidx.annotation.MainThread
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -29,7 +30,7 @@ import com.ethran.notable.data.model.SimplePointF
 import com.ethran.notable.editor.canvas.CanvasEventBus
 import com.ethran.notable.editor.canvas.CanvasEventBus.drawingInProgress
 import com.ethran.notable.editor.canvas.CanvasEventBus.waitForDrawing
-import com.ethran.notable.editor.drawing.drawBesideSheet
+import com.ethran.notable.editor.drawing.drawStrips
 import com.ethran.notable.editor.drawing.drawBg
 import com.ethran.notable.editor.drawing.drawOnCanvasFromPage
 import com.ethran.notable.editor.utils.divideStrokesFromCut
@@ -52,7 +53,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicReference
@@ -535,7 +535,7 @@ class PageView(
             canvas.restore()
         } else
             canvas.drawColor(Color.WHITE)
-        drawStrips(canvas, page.sheet, viewport.zoom)
+        drawWholeStrips(canvas, page.sheet, viewport.zoom)
         log.d("loaded initial bitmap from background, page: ${page.pageId}")
     }
 
@@ -573,25 +573,33 @@ class PageView(
         val activeCanvas = canvas ?: synchronized(pageLock) { if (disposed) return; windowedCanvas }
         if (canvas == null) {
             // On the screen the page shows on its sheet only; beside it is the view's.
-            val bar = sideBarWidth(sheet, viewWidth, zoom)
-            if (bar > 0) {
-                val onSheet = Rect(bar, 0, viewWidth - bar, viewHeight)
+            val strip = stripWidth
+            if (strip > 0) {
+                val onSheet = Rect(strip, 0, viewWidth - strip, viewHeight)
                 if (onSheet.intersect(screenArea)) drawPageArea(activeCanvas, onSheet, ignoredStrokeIds, ignoredImageIds)
-                activeCanvas.withScale(1f / zoom, 1f / zoom) { drawBesideSheet(this, screenArea, bar, viewWidth) }
+                activeCanvas.withScale(1f / zoom, 1f / zoom) { drawStrips(this, screenArea, strip, viewWidth) }
                 return
             }
         }
         drawPageArea(activeCanvas, screenArea, ignoredStrokeIds, ignoredImageIds)
     }
 
+    /** The sheet of the shown page, or null for an infinite canvas. */
+    val sheet: SheetSize?
+        get() = openPage.sheet
+
+    /** The width of each strip beside the shown page's sheet, as the view shows it now. */
+    val stripWidth: Int
+        get() = stripWidthFor(sheet, viewWidth, zoom)
+
     /**
      * The strips beside a centred [sheet] at [zoom], over the whole of an unscaled [canvas] the
      * view's size. They are fixed to the screen, so a screen bitmap moved by a scroll or zoom
      * carries them out of place and they are painted again.
      */
-    private fun drawStrips(canvas: Canvas, sheet: SheetSize?, zoom: Float) {
-        val bar = sideBarWidth(sheet, viewWidth, zoom)
-        if (bar > 0) drawBesideSheet(canvas, Rect(0, 0, viewWidth, viewHeight), bar, viewWidth)
+    private fun drawWholeStrips(canvas: Canvas, sheet: SheetSize?, zoom: Float) {
+        val strip = stripWidthFor(sheet, viewWidth, zoom)
+        if (strip > 0) drawStrips(canvas, Rect(0, 0, viewWidth, viewHeight), strip, viewWidth)
     }
 
     private fun drawPageArea(
@@ -646,18 +654,6 @@ class PageView(
         return Rect(left, top, right, bottom)
     }
 
-    /** The sheet of the shown page, or null for an infinite canvas. */
-    val sheet: SheetSize?
-        get() = openPage.sheet
-
-    /**
-     * [viewport] moved to where this view may show a page with [sheet]. [commitViewport] applies
-     * it, so every viewport the view shows is one this returns; a step that reuses the screen
-     * bitmap moves it to the fitted viewport.
-     */
-    private fun fitted(viewport: PageViewport, sheet: SheetSize?): PageViewport =
-        fittedToSheet(viewport, sheet, viewWidth)
-
     suspend fun updateScroll(pageId: String, dragDelta: Offset) {
         // before scrolling, make sure that strokes are drawn.
         waitForDrawingWithSnack()
@@ -667,18 +663,9 @@ class PageView(
         // so we have to scale it back to page coordinates.
         val deltaInPage = Offset(dragDelta.x / start.zoom, dragDelta.y / start.zoom)
 
-        log.d("Delta in page coordinates: $deltaInPage")
-
         // The drag is cut to what the sheet allows: zero on a centred sheet, which cannot move sideways.
-        val next = fitted(start.copy(scroll = start.scroll + deltaInPage), sheet)
-        val allowed = next.scroll - start.scroll
-
-        // There is nothing to do, return.
-        if (allowed == Offset.Zero) return
-
-        commitViewport(pageId, next) ?: return
-        // To avoid rounding errors, we just calculate it again.
-        val movement = (allowed * start.zoom)
+        val next = commitViewport(pageId, start.copy(scroll = start.scroll + deltaInPage)) ?: return
+        val movement = (next.scroll - start.scroll) * start.zoom
         if (movement.toIntOffset() == IntOffset.Zero) return
 
         val width = windowedBitmap.width
@@ -702,7 +689,7 @@ class PageView(
             width,
             height
         )
-        windowedCanvas.withScale(1f / start.zoom, 1f / start.zoom) { drawStrips(this, sheet, start.zoom) }
+        windowedCanvas.withScale(1f / start.zoom, 1f / start.zoom) { drawWholeStrips(this, sheet, start.zoom) }
 
 //        persistBitmapDebounced()
     }
@@ -812,7 +799,7 @@ class PageView(
      * Zooms [pageId], if it is still shown, by reusing the existing screen bitmap.
      *
      * The page point under [center] (screen coordinates; the screen centre if null) stays under it,
-     * then [fitted] moves the view to where the page allows. The old screen is drawn where that
+     * then [fittedToSheet] moves the view to where the page allows. The old screen is drawn where that
      * viewport shows it, so the two always agree, and whatever it does not cover is drawn fresh.
      * Zooming in keeps the upscaled, softer pixels until the next full redraw.
      */
@@ -852,7 +839,7 @@ class PageView(
             floor(covered.bottom).toInt(),
         )
         redrawOutsideRect(coveredPixels, screenW, screenH)
-        windowedCanvas.withScale(1f / newZoom, 1f / newZoom) { drawStrips(this, sheet, newZoom) }
+        windowedCanvas.withScale(1f / newZoom, 1f / newZoom) { drawWholeStrips(this, sheet, newZoom) }
 
         log.i(
             "Zoom updated using snapshot scaling. zoom ${start.zoom} -> $newZoom, " +
@@ -965,16 +952,12 @@ class PageView(
         }
     }
 
+    @MainThread
     private fun updateCanvasDimensions() {
         checkMainThread("PageView.updateDimensions")
         // A zoom fitted to the old size does not fit the new one. The shown page drops it here, the
         // pages left before when they come back ([openingViewport]).
-        synchronized(pageLock) {
-            val shownSheet = openPage.sheet
-            viewportFlow.update { shown -> fitted(shown.copy(zoom = 1f), shownSheet) }
-        }
-        val shown = openPage
-        if (shown.record != null) recordScroll(shown.pageId, viewportFlow.value)
+        commitViewport(openPage.pageId, viewportFlow.value.copy(zoom = 1f))
         // Blank at the new size, rather than read from disk on the main thread; the redraw below
         // fills it.
         val zoom = viewportFlow.value.zoom
@@ -1002,17 +985,18 @@ class PageView(
         synchronized(pageLock) { viewportFlow.value.takeIf { !disposed && currentPageId == pageId } }
 
     /**
-     * Sets [pageId]'s viewport to [target], [fitted] to its sheet, and records its scroll, both axes,
+     * Sets [pageId]'s viewport to [target], [fittedToSheet] to its sheet, and records its scroll, both axes,
      * for saving, if [pageId] is shown and has a record. Returns the viewport set, which a step that
      * reuses the screen bitmap has to move it to. Returns null, changing nothing, otherwise: another
      * page is shown, no page is shown yet, the page is missing, or the view is disposed.
      */
+    @MainThread
     private fun commitViewport(pageId: String, target: PageViewport): PageViewport? {
         checkMainThread("PageView.commitViewport")
         val next = synchronized(pageLock) {
             val shown = openPage
             if (disposed || shown.pageId != pageId || shown.record == null) return null
-            fitted(target, shown.sheet).also { viewportFlow.value = it }
+            fittedToSheet(target, shown.sheet, viewWidth).also { viewportFlow.value = it }
         }
         recordScroll(pageId, next)
         return next

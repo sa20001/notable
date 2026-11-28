@@ -54,7 +54,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ethran.notable.R
-import com.ethran.notable.data.model.PageMode
+import com.ethran.notable.data.model.PageFormat
 import com.ethran.notable.data.model.SheetSize
 import com.ethran.notable.data.db.Folder
 import com.ethran.notable.data.db.Notebook
@@ -268,7 +268,7 @@ private fun NotebookConfigContent(
             Text(stringResource(R.string.details_notebook_pages, book.pageIds.size))
             // Display only: the sheet is chosen when the notebook is made.
             book.defaultSheet?.let { sheet ->
-                val preset = PageMode.matching(sheet)?.let { stringResource(it.displayNameId) }
+                val preset = PageFormat.matching(sheet)?.let { stringResource(it.displayNameId) }
                 val orientation = stringResource(
                     if (sheet.width > sheet.height) R.string.page_orientation_landscape
                     else R.string.page_orientation_portrait

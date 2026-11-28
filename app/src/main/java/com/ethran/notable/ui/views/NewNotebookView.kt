@@ -42,7 +42,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ethran.notable.R
 import com.ethran.notable.data.db.Folder
-import com.ethran.notable.data.model.PageMode
+import com.ethran.notable.data.model.PageFormat
 import com.ethran.notable.data.model.SheetOrientation
 import com.ethran.notable.data.model.BackgroundType
 import com.ethran.notable.navigation.NavigationDestination
@@ -99,7 +99,7 @@ fun NewNotebookView(
             onCreate = viewModel::create,
             onTitleChange = viewModel::setTitle,
             onChangeFolder = { showFolderPicker = true },
-            onPageModeChange = viewModel::setPageMode,
+            onPageFormatChange = viewModel::setPageFormat,
             onOrientationChange = viewModel::setOrientation,
             backgroundSelector = {
                 BackgroundSelectorContent(
@@ -122,7 +122,7 @@ private fun NewNotebookContent(
     onCreate: () -> Unit,
     onTitleChange: (String) -> Unit,
     onChangeFolder: () -> Unit,
-    onPageModeChange: (PageMode) -> Unit,
+    onPageFormatChange: (PageFormat) -> Unit,
     onOrientationChange: (SheetOrientation) -> Unit,
     backgroundSelector: @Composable () -> Unit,
 ) {
@@ -183,12 +183,12 @@ private fun NewNotebookContent(
                 }
 
                 SelectorRow(
-                    label = stringResource(R.string.details_notebook_pageMode),
-                    options = PageMode.entries.map { it to stringResource(it.displayNameId) },
-                    value = state.pageMode,
-                    onValueChange = onPageModeChange,
+                    label = stringResource(R.string.details_notebook_page_format),
+                    options = PageFormat.entries.map { it to stringResource(it.displayNameId) },
+                    value = state.pageFormat,
+                    onValueChange = onPageFormatChange,
                 )
-                if (state.pageMode != PageMode.INFINITE) {
+                if (state.pageFormat != PageFormat.INFINITE) {
                     SelectorRow(
                         label = stringResource(R.string.page_orientation),
                         options = listOf(
@@ -220,7 +220,7 @@ private fun NewNotebookPreview() {
             folderId = "f1",
             backgroundType = BackgroundType.Native.key,
             background = "lined",
-            pageMode = PageMode.A4,
+            pageFormat = PageFormat.A4,
             orientation = SheetOrientation.PORTRAIT,
         ),
         breadcrumbFolders = listOf(Folder(title = "Studies")),
@@ -228,7 +228,7 @@ private fun NewNotebookPreview() {
         onCreate = {},
         onTitleChange = {},
         onChangeFolder = {},
-        onPageModeChange = {},
+        onPageFormatChange = {},
         onOrientationChange = {},
         backgroundSelector = {
             Box(

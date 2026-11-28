@@ -5,7 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import com.ethran.notable.R
 import com.ethran.notable.data.datastore.AppSettings
-import com.ethran.notable.data.model.PageMode
+import com.ethran.notable.data.model.PageFormat
 import com.ethran.notable.navigation.LinkFormat
 
 
@@ -25,14 +25,14 @@ fun GeneralSettings(
                 onSettingsChange(settings.copy(defaultNativeTemplate = it))
             })
         SelectorRow(
-            label = stringResource(R.string.default_page_mode),
-            options = PageMode.entries.map {
+            label = stringResource(R.string.default_page_format),
+            options = PageFormat.entries.map {
                 it to stringResource(it.displayNameId)
             },
-            value = settings.defaultPageMode,
+            value = settings.defaultPageFormat,
             onValueChange = {
                 onSettingsChange(
-                    settings.copy(defaultPageMode = it)
+                    settings.copy(defaultPageFormat = it)
                 )
             }
         )

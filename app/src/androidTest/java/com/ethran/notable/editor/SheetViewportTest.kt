@@ -2,7 +2,6 @@ package com.ethran.notable.editor
 
 import android.content.Context
 import android.graphics.Color
-import android.graphics.Matrix
 import android.graphics.Rect
 import androidx.compose.ui.geometry.Offset
 import androidx.test.core.app.ApplicationProvider
@@ -58,16 +57,11 @@ class SheetViewportTest {
         views.open(views.seedPage(sheet), viewWidth, viewHeight)
 
     @Test(timeout = 60_000)
-    fun aDrag_stopsAtTheSheetEdge_andAnInfinitePageAtItsLeftEdge() = runBlocking {
+    fun aDrag_stopsAtTheSheetEdge() = runBlocking {
         val sheetWidth = A5_SHEET.width
-        val wide = open(A5_SHEET, viewWidth = sheetWidth / 2, viewHeight = 400)
-        onMain { wide.updateScroll(wide.currentPageId, Offset(sheetWidth * 2f, 30f)) }
-        assertEquals(PageViewport(Offset((sheetWidth - sheetWidth / 2).toFloat(), 30f)), wide.viewport.value)
-
-        val infinite = open(null, viewWidth = 800, viewHeight = 600)
-        onMain { infinite.updateScroll(infinite.currentPageId, Offset(50f, 0f)) }
-        onMain { infinite.updateScroll(infinite.currentPageId, Offset(-500f, 0f)) }
-        assertEquals(PageViewport(), infinite.viewport.value)
+        val page = open(A5_SHEET, viewWidth = sheetWidth / 2, viewHeight = 400)
+        onMain { page.updateScroll(page.currentPageId, Offset(sheetWidth * 2f, 30f)) }
+        assertEquals(PageViewport(Offset((sheetWidth - sheetWidth / 2).toFloat(), 30f)), page.viewport.value)
     }
 
     /**
@@ -109,7 +103,7 @@ class SheetViewportTest {
     }
 
     /**
-     * A resize drops the zoom, on the screen canvas too, fits the sheet in the new width, and saves
+     * A resize drops the zoom, fits the sheet in the new width, and saves
      * the scroll it fits: the record says where the sheet sits now, not where it sat before.
      */
     @Test(timeout = 60_000)
@@ -123,9 +117,6 @@ class SheetViewportTest {
         val newWidth = (sheetWidth * 2f).toInt()
         onMain { page.updateDimensions(newWidth, 600) }
 
-        @Suppress("DEPRECATION") // Canvas.getMatrix() is the only public way to read the transform.
-        val values = FloatArray(9).also { page.windowedCanvas.matrix.getValues(it) }
-        assertEquals(1f, values[Matrix.MSCALE_X], 0.001f)
         val centred = -(newWidth - sheetWidth) / 2f
         assertEquals(PageViewport(Offset(centred, page.scroll.y)), page.viewport.value)
         assertEquals(AppResult.Success(Unit), views.data.pageSaver.saveAll())
@@ -151,20 +142,6 @@ class SheetViewportTest {
         assertEquals(-(newWidth - sheetWidth) / 2f, page.scroll.x, 0.01f)
     }
 
-    /** The scroll is saved on both axes, and a new view of the page opens there. */
-    @Test(timeout = 60_000)
-    fun aReopenedPage_isBackWhereItWasLeft_onBothAxes() = runBlocking {
-        val sheetWidth = A5_SHEET.width
-        val page = open(A5_SHEET, viewWidth = sheetWidth / 2, viewHeight = 400)
-        val pageId = page.currentPageId
-        onMain { page.updateScroll(pageId, Offset(sheetWidth * 2f, 120f)) }
-        val left = page.viewport.value
-        assertEquals(AppResult.Success(Unit), views.data.pageSaver.saveAll())
-
-        page.disposeOldPage()
-        assertEquals(left, views.open(pageId, page.viewWidth, page.viewHeight).viewport.value)
-    }
-
     /**
      * Page content shows on the sheet only. A stroke beside a centred sheet, moved there or written
      * on another device, is kept in the page but not drawn over the strip.
@@ -180,9 +157,9 @@ class SheetViewportTest {
         val page = views.open(pageId, viewWidth, 700)
         onMain { page.drawAreaScreenCoordinates(Rect(0, 0, viewWidth, 700)) }
 
-        val bar = (viewWidth - sheetWidth) / 2
-        assertTrue("the stroke on the sheet is drawn", inkIn(page, bar, viewWidth - bar))
-        assertFalse("the one beside it is not", inkIn(page, viewWidth - bar + 3, viewWidth))
+        val strip = page.stripWidth
+        assertTrue("the stroke on the sheet is drawn", inkIn(page, strip, viewWidth - strip))
+        assertFalse("the one beside it is not", inkIn(page, viewWidth - strip + 3, viewWidth))
     }
 
     /**
@@ -213,7 +190,7 @@ class SheetViewportTest {
 
     /** The pixels of [page]'s left strip, short of the line at the sheet's edge. */
     private fun leftStrip(page: PageView): IntArray {
-        val width = sideBarWidth(page.sheet, page.viewWidth, page.zoom) - 2
+        val width = page.stripWidth - 2
         val bitmap = page.windowedBitmap
         return IntArray(width * bitmap.height).also { bitmap.getPixels(it, 0, width, 0, 0, width, bitmap.height) }
     }

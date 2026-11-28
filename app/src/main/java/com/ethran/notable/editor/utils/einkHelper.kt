@@ -81,14 +81,14 @@ fun onSurfaceChanged(view: View) {
 data class RawDrawingArea(val limit: Rect, val exclude: Rect)
 
 /**
- * Where raw drawing works on [view]: everything but the toolbar and the strips [sideBarWidth] wide
+ * Where raw drawing works on [view]: everything but the toolbar and the strips [stripWidth] wide
  * on each side of a centred sheet.
  */
-fun rawDrawingArea(view: View, toolbarHeight: Int, sideBarWidth: Int = 0): RawDrawingArea {
+fun rawDrawingArea(view: View, toolbarHeight: Int, stripWidth: Int): RawDrawingArea {
     val viewWidth = view.width
     val viewHeight = view.height
-    val left = sideBarWidth
-    val right = viewWidth - sideBarWidth
+    val left = stripWidth
+    val right = viewWidth - stripWidth
     return if (GlobalAppSettings.current.toolbarPosition == AppSettings.Position.Top) {
         RawDrawingArea(
             limit = Rect(left, toolbarHeight, right, viewHeight),

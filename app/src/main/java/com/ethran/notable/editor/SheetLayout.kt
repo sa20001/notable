@@ -15,7 +15,7 @@ import kotlin.math.ceil
  * 0 when the sheet fills the view or the page has no sheet. Rounded up, so the strips cover all
  * of the view outside the sheet.
  */
-fun sideBarWidth(sheet: SheetSize?, viewWidth: Int, zoom: Float): Int {
+fun stripWidthFor(sheet: SheetSize?, viewWidth: Int, zoom: Float): Int {
     if (sheet == null) return 0
     val sheetWidth = sheet.width * zoom
     // Less than half a pixel of slack is float rounding of a fit, not a strip.

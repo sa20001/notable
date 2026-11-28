@@ -7,7 +7,7 @@ import com.ethran.notable.SCREEN_HEIGHT
 import com.ethran.notable.SCREEN_WIDTH
 import com.ethran.notable.data.AppRepository
 import com.ethran.notable.data.datastore.GlobalAppSettings
-import com.ethran.notable.data.model.PageMode
+import com.ethran.notable.data.model.PageFormat
 import com.ethran.notable.data.model.SheetOrientation
 import com.ethran.notable.data.db.Folder
 import com.ethran.notable.data.db.Notebook
@@ -43,7 +43,7 @@ data class NewNotebookState(
     val folderId: String?,
     val backgroundType: String,
     val background: String,
-    val pageMode: PageMode,
+    val pageFormat: PageFormat,
     val orientation: SheetOrientation,
 )
 
@@ -65,7 +65,7 @@ class NewNotebookViewModel @Inject constructor(
             folderId = savedStateHandle[NewNotebookDestination.FOLDER_ID_ARG],
             backgroundType = BackgroundType.Native.key,
             background = GlobalAppSettings.current.defaultNativeTemplate,
-            pageMode = GlobalAppSettings.current.defaultPageMode,
+            pageFormat = GlobalAppSettings.current.defaultPageFormat,
             orientation = SheetOrientation.PORTRAIT,
         )
     )
@@ -93,7 +93,7 @@ class NewNotebookViewModel @Inject constructor(
         it.copy(backgroundType = type, background = background ?: it.background)
     }
 
-    fun setPageMode(mode: PageMode) = _state.update { it.copy(pageMode = mode) }
+    fun setPageFormat(format: PageFormat) = _state.update { it.copy(pageFormat = format) }
 
     fun setOrientation(orientation: SheetOrientation) =
         _state.update { it.copy(orientation = orientation) }
@@ -108,7 +108,7 @@ class NewNotebookViewModel @Inject constructor(
             defaultBackground = state.background,
             defaultBackgroundType = state.backgroundType,
             // Sized to this device's screen, then fixed: the sheet is the same on every device.
-            defaultSheet = state.pageMode.sheetSize(state.orientation, SCREEN_WIDTH, SCREEN_HEIGHT),
+            defaultSheet = state.pageFormat.sheetSize(state.orientation, SCREEN_WIDTH, SCREEN_HEIGHT),
         )
         viewModelScope.launch {
             try {

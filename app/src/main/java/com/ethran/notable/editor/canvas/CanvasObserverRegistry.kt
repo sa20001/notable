@@ -5,7 +5,7 @@ import android.graphics.Rect
 import com.ethran.notable.editor.EditorViewModel
 import com.ethran.notable.editor.PageView
 import com.ethran.notable.editor.PageViewport
-import com.ethran.notable.editor.sideBarWidth
+import com.ethran.notable.editor.stripWidthFor
 import com.ethran.notable.editor.state.History
 import com.ethran.notable.editor.state.Mode
 import com.ethran.notable.editor.utils.ImageHandler
@@ -179,9 +179,9 @@ class CanvasObserverRegistry(
         // shown page's sheet, so the session is rebuilt over the new area when it changes. Once it
         // has settled: a pinch changes it at every step, and a rebuild takes tens of milliseconds.
         observerScope.launch {
-            page.viewport.map { sideBarWidth(page.sheet, drawCanvas.width, it.zoom) }
+            page.viewport.map { stripWidthFor(page.sheet, page.viewWidth, it.zoom) }
                 .distinctUntilChanged().drop(1).debounce(STRIP_SETTLE_MS).collect { width ->
-                    log.v("side bars now $width px wide")
+                    log.v("strips now $width px wide")
                     inputHandler.updateActiveSurface()
                 }
         }

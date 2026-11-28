@@ -16,7 +16,7 @@ class SheetLayoutTest {
             for (zoom in listOf(0.5f, 0.75f, 1f)) {
                 val drawn = sheetWidth * zoom
                 if (drawn > viewWidth - 0.5f) continue
-                val bar = sideBarWidth(SheetSize(sheetWidth, 2000), viewWidth, zoom)
+                val bar = stripWidthFor(SheetSize(sheetWidth, 2000), viewWidth, zoom)
                 val message = "sheet $sheetWidth at $zoom"
                 assertTrue("$message: strips cover the slack", 2 * bar >= viewWidth - drawn)
                 assertTrue("$message: strips stay off the sheet", 2 * bar <= viewWidth - drawn + 2)
@@ -26,13 +26,13 @@ class SheetLayoutTest {
 
     @Test
     fun aSheetFillingOrWiderThanTheView_orNoSheet_getsNoStrips() {
-        assertEquals(0, sideBarWidth(SheetSize(1404, 2000), viewWidth, 1f))
-        assertEquals(0, sideBarWidth(SheetSize(2480, 2000), viewWidth, 1f))
+        assertEquals(0, stripWidthFor(SheetSize(1404, 2000), viewWidth, 1f))
+        assertEquals(0, stripWidthFor(SheetSize(2480, 2000), viewWidth, 1f))
         // Fitted to the width: the sheet spans the view, up to float rounding.
-        assertEquals(0, sideBarWidth(SheetSize(1860, 2632), viewWidth, viewWidth / 1860f))
+        assertEquals(0, stripWidthFor(SheetSize(1860, 2632), viewWidth, viewWidth / 1860f))
         // One whose product rounds to 1403.9999, under the view width.
-        assertEquals(0, sideBarWidth(SheetSize(2101, 3000), viewWidth, viewWidth / 2101f))
-        assertEquals(0, sideBarWidth(null, viewWidth, 0.5f))
+        assertEquals(0, stripWidthFor(SheetSize(2101, 3000), viewWidth, viewWidth / 2101f))
+        assertEquals(0, stripWidthFor(null, viewWidth, 0.5f))
     }
 
     @Test

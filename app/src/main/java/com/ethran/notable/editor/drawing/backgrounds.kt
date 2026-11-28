@@ -43,12 +43,12 @@ private val defaultPaint = Paint().apply {
 
 // The strips beside a sheet: white, dotted in grey on a grid fixed to the screen, so separately
 // drawn parts line up. One tile, repeated by the shader.
-private const val SIDE_BAR_DOT_SPACING = 18
-private val sideBarPaint = Paint().apply {
-    val tile = Bitmap.createBitmap(SIDE_BAR_DOT_SPACING, SIDE_BAR_DOT_SPACING, Bitmap.Config.ARGB_8888)
+private const val STRIP_DOT_SPACING = 18
+private val stripPaint = Paint().apply {
+    val tile = Bitmap.createBitmap(STRIP_DOT_SPACING, STRIP_DOT_SPACING, Bitmap.Config.ARGB_8888)
     Canvas(tile).apply {
         drawColor(Color.WHITE)
-        val centre = SIDE_BAR_DOT_SPACING / 2f
+        val centre = STRIP_DOT_SPACING / 2f
         drawCircle(centre, centre, 1.25f, Paint().apply { color = Color.rgb(120, 120, 120) })
     }
     shader = BitmapShader(tile, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
@@ -382,14 +382,14 @@ fun drawBg(
 
 /**
  * The view beside a centred sheet, in [area] (screen pixels, on an unscaled [canvas]): strips
- * [barWidth] wide on each side of a view [viewWidth] wide, dotted, with a line at the sheet's edges.
+ * [stripWidth] wide on each side of a view [viewWidth] wide, dotted, with a line at the sheet's edges.
  * Not page drawing: no page content shows there.
  */
-fun drawBesideSheet(canvas: Canvas, area: Rect, barWidth: Int, viewWidth: Int) {
-    for (bar in listOf(Rect(0, area.top, barWidth, area.bottom), Rect(viewWidth - barWidth, area.top, viewWidth, area.bottom))) {
-        if (bar.intersect(area)) canvas.drawRect(bar, sideBarPaint)
+fun drawStrips(canvas: Canvas, area: Rect, stripWidth: Int, viewWidth: Int) {
+    for (strip in listOf(Rect(0, area.top, stripWidth, area.bottom), Rect(viewWidth - stripWidth, area.top, viewWidth, area.bottom))) {
+        if (strip.intersect(area)) canvas.drawRect(strip, stripPaint)
     }
-    for (x in listOf(barWidth, viewWidth - barWidth)) {
+    for (x in listOf(stripWidth, viewWidth - stripWidth)) {
         if (x < area.left - 2 || x > area.right + 2) continue
         canvas.drawLine(x.toFloat(), area.top.toFloat(), x.toFloat(), area.bottom.toFloat(), marginPaint)
     }
