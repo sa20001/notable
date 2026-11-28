@@ -10,13 +10,11 @@ import android.graphics.Rect
 import android.graphics.RectF
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntOffset
-import androidx.core.graphics.withScale
 import com.ethran.notable.SCREEN_HEIGHT
 import com.ethran.notable.SCREEN_WIDTH
 import com.ethran.notable.data.datastore.GlobalAppSettings
 import com.ethran.notable.data.model.BackgroundType
 import com.ethran.notable.data.model.SheetSize
-import com.ethran.notable.editor.sideBarWidth
 import com.ethran.notable.editor.utils.scaleRect
 import com.onyx.android.sdk.extension.copy
 import io.shipbook.shipbooksdk.ShipBook
@@ -361,7 +359,6 @@ fun drawBg(
     }
     drawTemplate(canvas, backgroundType, background, scroll, resourceBitmap, scale, repeat)
     if (sheet != null) {
-        drawSideBars(canvas, sideBarWidth(sheet, canvas.width, scale), scale)
         drawPageBreaks(canvas, scroll, scale, sheet.width.toFloat(), sheet.height.toFloat())
     } else {
         drawMargin(canvas, scroll, scale)
@@ -376,26 +373,27 @@ fun drawBg(
     }
 }
 
-/** Covers the strips [barWidth] screen pixels wide on each side of a centred sheet. */
-private fun drawSideBars(canvas: Canvas, barWidth: Int, scale: Float) {
-    if (barWidth <= 0) return
-    canvas.withScale(1f / scale, 1f / scale) {
-        val width = canvas.width
-        val height = canvas.height
-        for (bar in listOf(Rect(0, 0, barWidth, height), Rect(width - barWidth, 0, width, height))) {
-            canvas.drawRect(bar, sideBarBackgroundPaint)
-            for (y in bar.top until bar.bottom step SIDE_BAR_DOT_SPACING) {
-                for (x in bar.left until bar.right step SIDE_BAR_DOT_SPACING) {
-                    canvas.drawCircle(x.toFloat(), y.toFloat(), SIDE_BAR_DOT_RADIUS, sideBarPaint)
-                }
+/**
+ * The view beside a centred sheet, in [area] (screen pixels, on an unscaled [canvas]): strips
+ * [barWidth] wide on each side of a view [viewWidth] wide, dotted, with a line at the sheet's edges.
+ * Not page drawing: no page content shows there.
+ */
+fun drawBesideSheet(canvas: Canvas, area: Rect, barWidth: Int, viewWidth: Int) {
+    for (bar in listOf(Rect(0, area.top, barWidth, area.bottom), Rect(viewWidth - barWidth, area.top, viewWidth, area.bottom))) {
+        if (!bar.intersect(area)) continue
+        canvas.drawRect(bar, sideBarBackgroundPaint)
+        // On a fixed grid, so the dots of separately drawn areas line up.
+        val firstX = bar.left + Math.floorMod(-bar.left, SIDE_BAR_DOT_SPACING)
+        val firstY = bar.top + Math.floorMod(-bar.top, SIDE_BAR_DOT_SPACING)
+        for (y in firstY until bar.bottom step SIDE_BAR_DOT_SPACING) {
+            for (x in firstX until bar.right step SIDE_BAR_DOT_SPACING) {
+                canvas.drawCircle(x.toFloat(), y.toFloat(), SIDE_BAR_DOT_RADIUS, sideBarPaint)
             }
         }
-        // The sheet's edges.
-        for (x in listOf(barWidth, width - barWidth)) {
-            canvas.drawLine(
-                x.toFloat(), padding.toFloat(), x.toFloat(), (height - padding).toFloat(), marginPaint
-            )
-        }
+    }
+    for (x in listOf(barWidth, viewWidth - barWidth)) {
+        if (x < area.left - 2 || x > area.right + 2) continue
+        canvas.drawLine(x.toFloat(), area.top.toFloat(), x.toFloat(), area.bottom.toFloat(), marginPaint)
     }
 }
 

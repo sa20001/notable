@@ -3,6 +3,7 @@ package com.ethran.notable.editor
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.Rect
 import androidx.compose.ui.geometry.Offset
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -14,10 +15,12 @@ import com.ethran.notable.testing.A5_SHEET
 import com.ethran.notable.testing.A6_SHEET
 import com.ethran.notable.testing.SheetPageViews
 import com.ethran.notable.testing.onMain
+import com.ethran.notable.testing.testStroke
 import com.ethran.notable.utils.AppResult
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -159,5 +162,35 @@ class SheetViewportTest {
 
         page.disposeOldPage()
         assertEquals(left, views.open(pageId, page.viewWidth, page.viewHeight).viewport.value)
+    }
+
+    /**
+     * Page content shows on the sheet only. A stroke beside a centred sheet, moved there or written
+     * on another device, is kept in the page but not drawn over the strip.
+     */
+    @Test(timeout = 60_000)
+    fun aStrokeBesideTheSheet_isNotDrawnOverTheStrip() = runBlocking {
+        val sheetWidth = A6_SHEET.width
+        val pageId = views.seedPage(A6_SHEET)
+        views.data.db.strokeDao().create(
+            listOf(testStroke(pageId, x = 100f, y = 100f), testStroke(pageId, x = sheetWidth + 50f, y = 100f)),
+        )
+        val viewWidth = sheetWidth * 2
+        val page = views.open(pageId, viewWidth, 700)
+        onMain { page.drawAreaScreenCoordinates(Rect(0, 0, viewWidth, 700)) }
+
+        val bar = (viewWidth - sheetWidth) / 2
+        assertTrue("the stroke on the sheet is drawn", inkIn(page, bar, viewWidth - bar))
+        assertFalse("the one beside it is not", inkIn(page, viewWidth - bar + 3, viewWidth))
+    }
+
+    /** Whether [page]'s screen has dark ink (not the strips' grey dots) between columns [from] and [until]. */
+    private fun inkIn(page: PageView, from: Int, until: Int): Boolean {
+        val bitmap = page.windowedBitmap
+        val row = IntArray(until - from)
+        return (0 until bitmap.height).any { y ->
+            bitmap.getPixels(row, 0, row.size, from, y, row.size, 1)
+            row.any { Color.red(it) < 60 && Color.green(it) < 60 && Color.blue(it) < 60 }
+        }
     }
 }

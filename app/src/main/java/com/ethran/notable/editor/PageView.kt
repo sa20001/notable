@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.core.graphics.createBitmap
+import androidx.core.graphics.withScale
 import com.ethran.notable.R
 import com.ethran.notable.SCREEN_HEIGHT
 import com.ethran.notable.SCREEN_WIDTH
@@ -28,6 +29,7 @@ import com.ethran.notable.data.model.SimplePointF
 import com.ethran.notable.editor.canvas.CanvasEventBus
 import com.ethran.notable.editor.canvas.CanvasEventBus.drawingInProgress
 import com.ethran.notable.editor.canvas.CanvasEventBus.waitForDrawing
+import com.ethran.notable.editor.drawing.drawBesideSheet
 import com.ethran.notable.editor.drawing.drawBg
 import com.ethran.notable.editor.drawing.drawOnCanvasFromPage
 import com.ethran.notable.editor.utils.divideStrokesFromCut
@@ -568,6 +570,25 @@ class PageView(
         if (canvas == null) checkMainThread("PageView.drawAreaScreenCoordinates")
         // A disposed view has put its bitmap on the shelf, so it draws nothing more into it.
         val activeCanvas = canvas ?: synchronized(pageLock) { if (disposed) return; windowedCanvas }
+        if (canvas == null) {
+            // On the screen the page shows on its sheet only; beside it is the view's.
+            val bar = sideBarWidth(sheet, viewWidth, zoom)
+            if (bar > 0) {
+                val onSheet = Rect(bar, 0, viewWidth - bar, viewHeight)
+                if (onSheet.intersect(screenArea)) drawPageArea(activeCanvas, onSheet, ignoredStrokeIds, ignoredImageIds)
+                activeCanvas.withScale(1f / zoom, 1f / zoom) { drawBesideSheet(this, screenArea, bar, viewWidth) }
+                return
+            }
+        }
+        drawPageArea(activeCanvas, screenArea, ignoredStrokeIds, ignoredImageIds)
+    }
+
+    private fun drawPageArea(
+        activeCanvas: Canvas,
+        screenArea: Rect,
+        ignoredStrokeIds: List<String>,
+        ignoredImageIds: List<String>,
+    ) {
         val pageArea = toPageCoordinates(screenArea)
         val pageAreaWithoutScroll = removeScroll(pageArea)
         drawOnCanvasFromPage(
