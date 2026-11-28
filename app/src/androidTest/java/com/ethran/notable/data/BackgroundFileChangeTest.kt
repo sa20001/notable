@@ -26,7 +26,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -68,8 +67,6 @@ class BackgroundFileChangeTest {
     @After
     fun tearDown() {
         viewScope.cancel()
-        // A background cached arms its file's watch in the background, reading the page record.
-        runBlocking { delay(500) }
         pageIds.forEach { data.backgroundFileWatcher.unwatch(it) }
         data.close()
         dir.deleteRecursively()
@@ -292,6 +289,36 @@ class BackgroundFileChangeTest {
     }
 
     @Test(timeout = 30000)
+    fun followedFileMissingAtTheLoad_isWatchedOnceRendered() = runBlocking {
+        val image = File(dir, "background.png")
+        val book = File(dir, "book.pdf").also { writePdf(it, Color.RED) }
+        val pageId = createPage(followingNotebook(book), image, BackgroundType.Image)
+        pageDataManager.requestPageLoadJoin(pageId)
+
+        // The file appears, and the page is drawn: rendered by the drawing path, not by a load.
+        writeImage(image, Color.RED)
+        pageDataManager.renderBackground(pageId, image.path, -1, 1f)
+        writeImage(image, Color.BLUE)
+
+        assertTrue("render dropped", waitForCondition(10000) { !hasBackground(pageId) })
+    }
+
+    @Test(timeout = 30000)
+    fun anotherFileRenderedForACachedPage_isWatched() = runBlocking {
+        val first = File(dir, "first.png").also { writeImage(it, Color.RED) }
+        val second = File(dir, "second.png").also { writeImage(it, Color.RED) }
+        val book = File(dir, "book.pdf").also { writePdf(it, Color.RED) }
+        val pageId = createPage(followingNotebook(book), first, BackgroundType.Image)
+        pageDataManager.requestPageLoadJoin(pageId)
+
+        // The page now shows another file; it stays cached, so it isn't loaded again.
+        pageDataManager.renderBackground(pageId, second.path, -1, 1f)
+        writeImage(second, Color.BLUE)
+
+        assertTrue("render dropped", waitForCondition(10000) { !hasBackground(pageId) })
+    }
+
+    @Test(timeout = 30000)
     fun backgroundRenderedWhileItsFileChanges_showsTheFileAsItIsNow() = runBlocking {
         // The file is a pipe at first, so that it changes while the render reads it.
         val image = File(dir, "background.png")
@@ -346,6 +373,13 @@ class BackgroundFileChangeTest {
         data.db.pageDao().create(page)
         pageIds += page.id
         return page.id
+    }
+
+    private fun hasBackground(pageId: String) = pageDataManager.getBackground(pageId).bitmap != null
+
+    /** Writes a [color] image to [file] in place. */
+    private fun writeImage(file: File, color: Int) {
+        file.outputStream().use { solid(color).compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
     private fun solid(color: Int): Bitmap = createBitmap(100, 100).apply { eraseColor(color) }

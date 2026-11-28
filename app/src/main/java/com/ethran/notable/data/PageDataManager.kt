@@ -110,6 +110,10 @@ internal class PageCacheEntry(val pageId: String) {
     // for a render returned uncached: the screen bitmap may still show the file.
     var backgroundPath: String? = null
 
+    // The page follows its background file (its notebook observes it), so each file rendered for
+    // it is watched. Set by the background's load.
+    var followsBackgroundFile: Boolean = false
+
     // Native (dotted/lined/blank) backgrounds have no bitmap; caching this lets
     // ensureBackgroundLoaded skip a pointless reload. null = not yet known.
     var backgroundIsNative: Boolean? = null
@@ -654,11 +658,12 @@ class PageDataManager @Inject constructor(
 
             BackgroundType.Image, ImageRepeating, CoverImage -> -1
         }
-        synchronized(lock) { entries[pageId]?.backgroundIsNative = false }
-        // Watched before the file is read, so that a change during the render, or right after it,
-        // is reported and drops what was rendered. Blocking I/O, and outside the lock.
-        if (appRepository.isObservable(pageDataFromDb.notebookId)) {
-            backgroundFileWatcher.watch(pageId, background)
+        val follows = appRepository.isObservable(pageDataFromDb.notebookId)
+        synchronized(lock) {
+            getOrCreateEntryLocked(pageId).apply {
+                backgroundIsNative = false
+                followsBackgroundFile = follows
+            }
         }
         // Cached before this returns, so a caller that awaited the load (requestPageLoadJoin) finds
         // it, and ensureBackgroundLoaded does not render it a second time.
@@ -1130,15 +1135,30 @@ class PageDataManager @Inject constructor(
 
     /**
      * Renders page [pageNumber] of [path] (-1 for an image) at [scale] as the background of
-     * [pageId], and caches it (see [linkBackground]). Caller must hold no lock. The file is watched
-     * by then, if its page follows it: [preLoadBackground] starts that before the first render.
+     * [pageId], and caches it (see [renderAndLink]). Caller must hold no lock.
+     *
+     * If the page follows its background file, the file is watched before it is read, so that a
+     * change during the render, or right after it, is reported and drops what was rendered. A file
+     * missing then can't be watched; if it is there for the render, it is watched after it.
+     */
+    fun renderBackground(pageId: String, path: String, pageNumber: Int, scale: Float): Bitmap? {
+        val follows = synchronized(lock) { entries[pageId]?.followsBackgroundFile == true }
+        // Blocking I/O, so outside the lock; only a lookup once the file is watched.
+        val watched = follows && backgroundFileWatcher.watch(pageId, path)
+        val bitmap = renderAndLink(pageId, path, pageNumber, scale)
+        if (follows && !watched && bitmap != null) backgroundFileWatcher.watch(pageId, path)
+        return bitmap
+    }
+
+    /**
+     * Renders the background and caches it (see [linkBackground]).
      *
      * A render during which a background file changed may show the file as it was, so it is not
      * cached but rendered again, [MAX_BACKGROUND_RENDERS] times at most. If files still change, the
      * last render is returned uncached, and the page is marked as showing [path], for the next
      * change of it to find.
      */
-    fun renderBackground(pageId: String, path: String, pageNumber: Int, scale: Float): Bitmap? {
+    private fun renderAndLink(pageId: String, path: String, pageNumber: Int, scale: Float): Bitmap? {
         var renders = 0
         while (true) {
             val fileChanges = synchronized(lock) { backgroundFileChanges }

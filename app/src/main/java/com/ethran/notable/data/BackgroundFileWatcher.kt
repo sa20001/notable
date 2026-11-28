@@ -56,23 +56,25 @@ class BackgroundFileWatcher @Inject constructor(
 
     /**
      * Watch [filePath] for [pageId]. Registering the same file for a second page only adds the id —
-     * one observer per file.
+     * one observer per file. Returns whether the file is observed; it isn't if it is missing or
+     * unreadable now.
      *
      * Touches the filesystem: **must not** be called while holding the page-cache lock.
      */
-    fun watch(pageId: String, filePath: String) {
+    fun watch(pageId: String, filePath: String): Boolean {
         synchronized(registryLock) {
             pagesByFile.getOrPut(filePath) { mutableSetOf() }.add(pageId)
-            if (observers.containsKey(filePath)) return // already observing this file
+            if (observers.containsKey(filePath)) return true // already observing this file
 
             val file = File(filePath)
             if (!file.exists() || !file.canRead()) {
                 log.w("Cannot observe background file: $filePath does not exist or is not readable")
-                return
+                return false
             }
             val observer = newObserver(file, filePath)
             observer.startWatching()
             observers[filePath] = observer
+            return true
         }
     }
 
