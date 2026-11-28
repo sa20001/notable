@@ -3,6 +3,7 @@ package com.ethran.notable.editor.canvas
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -86,14 +87,28 @@ class DrawCanvas(
         eraseSettleMillis = DeviceCompat::eraseSettleMillis,
     )
 
-    val refreshManager = CanvasRefreshManager(this, page, rawDrawing)
-
-
     private val observers = CanvasObserverRegistry(
-        coroutineScope, this, page, viewModel, history, inputHandler, refreshManager
+        coroutineScope, this, page, viewModel, history, inputHandler
     )
 
     fun registerObservers() = observers.registerAll()
+
+    /**
+     * Shows [dirtyRect] of the page (screen coordinates; null: all of it) on this surface, from any
+     * thread, as soon as the page owns the surface ([RawDrawingController.showPage]). Only the
+     * page's surface: the Compose UI (toolbar, menus) is not touched.
+     */
+    fun refreshUi(dirtyRect: Rect?) {
+        log.d("refreshUi: scroll: ${page.scroll}, zoom: ${page.zoom}")
+        val area = dirtyRect?.toScreenArea()
+        post { rawDrawing.showPage(area) }
+    }
+
+    /** [refreshUi] of the whole page, after the stroke being drawn (if any) is in the bitmap. */
+    suspend fun refreshUiSuspend() {
+        CanvasEventBus.waitForDrawing()
+        refreshUi(null)
+    }
 
     /**
      * Registered once, for the life of the view: Android destroys the surface when the app goes to

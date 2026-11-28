@@ -30,7 +30,6 @@ com.ethran.notable/
         - RawDrawingController.kt — The only owner of the canvas surface and of the pen's on/off state.
         - SurfaceWriter.kt — The only code that locks and posts the surface.
         - PenDevice.kt — The only caller of the Onyx `TouchHelper`'s raw-drawing switches and live pen style.
-        - CanvasRefreshManager.kt — Hands the editor's redraw and preview requests to the controller.
         - CanvasObserverRegistry.kt — The flows the canvas reacts to (ViewModel state, CanvasEventBus).
         - CanvasEventBus.kt — App-wide canvas signals (redraw, refresh, resumed/focus state).
         - QuickNavScrubs.kt — QuickNav scrubs and their page previews; each scrub has its own id (`CanvasEventBus.quickNav`).

@@ -168,7 +168,7 @@ class RawDrawingController<P : Any>(
      * Commits an erase over [area] (null: all of it), run by [applyState]: block input, push the
      * erased area while frozen, exit raw drawing (which clears the eraser track and scribble ink),
      * and keep the pen off while the panel settles. With the pen off there is nothing to clear:
-     * the area is just shown.
+     * the area is just shown. Call after the page bitmap is repainted.
      */
     fun commitErase(area: ScreenArea?, areaErase: Boolean) {
         checkThread()

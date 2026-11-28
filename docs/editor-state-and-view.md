@@ -19,7 +19,7 @@ The `EditorViewModel` is an Android `ViewModel` that holds the editor UI state.
 - **Role**:
     - Holds the editor UI state in one flat `StateFlow<ToolbarUiState>` (`toolbarState`): selected pen preset and its settings, eraser, editor mode, open menus, the current `pageId` and `notebookId`, and more.
     - Takes user actions as `ToolbarAction`s (`onToolbarAction`), sends imperative drawing work to the canvas as `CanvasCommand`s (`canvasCommands`) and navigation as `EditorUiEvent`s.
-    - `ToolbarUiState.isDrawing` (whether the pen draws, i.e. raw drawing is on) is derived, never stored: it is true while the activity is resumed and focused, no menu, stroke menu, background selector or QuickNav is open, and nothing is selected or being selected. To change it, change one of its inputs.
+    - `ToolbarUiState.isDrawing` (whether the UI wants the pen to draw; `RawDrawingController` may still keep it off, e.g. while a post settles) is derived, never stored: it is true while the activity is resumed and focused, no menu, stroke menu, background selector or QuickNav is open, and nothing is selected or being selected. To change it, change one of its inputs.
     - Owns the `SelectionState` (`selectionState`), which is the only writer of `ToolbarUiState.isSelectionActive`.
     - Injects required global state components and caches user preferences.
     - Once the `PageView` shows a page (`onPageShown`), cancels loads of pages left behind and
@@ -99,7 +99,7 @@ class DrawCanvas(
 ```
 
 - **Responsibilities**:
-    - Implements a `SurfaceView` that shows the `PageView`'s screen bitmap. The page content is drawn into that bitmap (`editor/drawing/pageDrawing.kt`); `CanvasRefreshManager` copies it to the surface and drives the e-ink refresh.
-    - `OnyxInputHandler` runs the Onyx raw drawing (`TouchHelper`) and turns pen input into strokes, erasing and lasso selection. Raw drawing is on exactly while `ToolbarUiState.isDrawing` is true; `CanvasObserverRegistry` collects that and the other `EditorViewModel` / `CanvasEventBus` flows the canvas reacts to.
+    - Implements a `SurfaceView` that shows the `PageView`'s screen bitmap. The page content is drawn into that bitmap (`editor/drawing/pageDrawing.kt`); `RawDrawingController` decides when it is copied to the surface (`SurfaceWriter`) and drives the raw-drawing pen; `refreshUi(rect)` asks for a redraw from any thread.
+    - `OnyxInputHandler` runs the Onyx raw drawing (`TouchHelper`) and turns pen input into strokes, erasing and lasso selection. `ToolbarUiState.isDrawing` requests raw drawing, and `RawDrawingController` turns it on when that request is up and nothing holds the pen off (a settling post or erase, a QuickNav preview, a failed write); `CanvasObserverRegistry` collects that and the other `EditorViewModel` / `CanvasEventBus` flows the canvas reacts to.
     - Consumes stylus and eraser touch events (`MotionEvent.TOOL_TYPE_STYLUS` / `TOOL_TYPE_ERASER`) so Compose underneath never sees them. On non-Onyx devices they go to `OpenGLRenderer`, a front-buffered OpenGL renderer.
     - Keeps pen input with the page it was made on: the page is recorded when the pen goes down, and a stroke or erase whose page is no longer shown when its points arrive is dropped. Pen callbacks and page swaps both run on the main thread.

@@ -122,8 +122,9 @@ data class ToolbarUiState(
         (mode == Mode.Draw || mode == Mode.Line) && penPresetId == presetId
 
     /**
-     * Whether the pen draws (raw drawing on). Derived only, never stored: to change it,
-     * change one of its inputs, and the canvas follows the latest state.
+     * Whether the UI wants the pen to draw. The canvas's RawDrawingController turns raw drawing on
+     * only while this is true, but may keep it off longer (a post settling, a QuickNav preview).
+     * Derived only, never stored: to change it, change one of its inputs.
      */
     val isDrawing: Boolean
         get() = isResumed && hasWindowFocus &&

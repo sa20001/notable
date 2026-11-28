@@ -16,7 +16,7 @@ also leave strokes without live ink.
 - `SurfaceWriter` locks, draws and posts the editor surface. `PenDevice` wraps
   the Onyx SDK. Without an Onyx pen, the controller uses `NoPenDevice` and OpenGL
   provides live ink (to be change later probably).
-- Call `CanvasRefreshManager.refreshUi(dirtyRect)` to request a redraw. The rect is
+- Call `DrawCanvas.refreshUi(dirtyRect)` to request a redraw. The rect is
   in screen coordinates (pixels of the view, after scroll and zoom; see
   [Coordinates](editor-state-and-view.md#pageview)). Pass `null` for the whole page. `OnyxInputHandler` reports strokes
   and commits erases after updating the page bitmap.

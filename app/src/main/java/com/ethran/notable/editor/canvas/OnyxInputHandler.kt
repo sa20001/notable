@@ -211,7 +211,7 @@ class OnyxInputHandler(
                             points = points
                         )
                     }
-                    drawCanvas.refreshManager.refreshUi(trackArea(plist))
+                    drawCanvas.refreshUi(trackArea(plist))
                 }
             }
 
@@ -253,7 +253,7 @@ class OnyxInputHandler(
                                 )
                             )
                         }
-                        drawCanvas.refreshManager.refreshUi(dirtyRect)
+                        drawCanvas.refreshUi(dirtyRect)
                     }
 
                 }
@@ -307,14 +307,14 @@ class OnyxInputHandler(
                             // need the region to cover the firmware's live track.
                             val dirty = trackArea(plist).apply { union(erasedByScribbleDirtyRect) }
                             // Use areaErase=true for the longer 500ms settle (scribble is a large gesture).
-                            drawCanvas.refreshManager.commitErase(dirty, areaErase = true)
+                            rawDrawing.commitErase(dirty.toScreenArea(), areaErase = true)
                         }
 
                     }
                     if (dropped) {
                         // Made on a page no longer shown; only the firmware's ink is left to clear.
                         log.i("Stroke made on page $pageId dropped, another page is shown")
-                        drawCanvas.refreshManager.refreshUi(trackArea(plist))
+                        drawCanvas.refreshUi(trackArea(plist))
                     }
                 }
             }
@@ -339,7 +339,9 @@ class OnyxInputHandler(
         if (pageId != page.currentPageId) {
             // Made on a page no longer shown: only the eraser track is cleared.
             log.i("Erasing made on page $pageId dropped, another page is shown")
-            drawCanvas.refreshManager.commitErase(strokeArea, areaErase = toolbarState.eraser == Eraser.SELECT)
+            rawDrawing.commitErase(
+                strokeArea.toScreenArea(), areaErase = toolbarState.eraser == Eraser.SELECT
+            )
             return
         }
         val viewport = page.viewport.value
@@ -361,7 +363,9 @@ class OnyxInputHandler(
         if (zoneEffected != null) dirty.union(zoneEffected)
         // Area (lasso/select) erase needs the longer 500ms settle; the
         // pen/marker erase uses the 150ms stroke settle.
-        drawCanvas.refreshManager.commitErase(dirty, areaErase = toolbarState.eraser == Eraser.SELECT)
+        rawDrawing.commitErase(
+            dirty.toScreenArea(), areaErase = toolbarState.eraser == Eraser.SELECT
+        )
     }
 
 }

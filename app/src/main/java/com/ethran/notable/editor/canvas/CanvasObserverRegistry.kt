@@ -10,6 +10,7 @@ import com.ethran.notable.editor.state.Mode
 import com.ethran.notable.editor.utils.ImageHandler
 import com.ethran.notable.editor.utils.cleanAllStrokes
 import com.ethran.notable.editor.utils.loadPagePreviewOrFallback
+import com.ethran.notable.editor.utils.refreshScreenRegion
 import io.shipbook.shipbooksdk.ShipBook
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,7 +35,6 @@ class CanvasObserverRegistry(
     private val viewModel: EditorViewModel,
     private val history: History,
     private val inputHandler: OnyxInputHandler,
-    private val refreshManager: CanvasRefreshManager
 ) {
     private val log = ShipBook.getLogger("CanvasObservers")
     private val pageDataManager = page.pageDataManager
@@ -107,7 +107,7 @@ class CanvasObserverRegistry(
                 }
                 lastImmediate = shown
                 log.v("Refreshing UI!")
-                refreshManager.refreshUi(null)
+                drawCanvas.refreshUi(null)
             }
         }
     }
@@ -118,7 +118,7 @@ class CanvasObserverRegistry(
                 // On loading, make sure that the loaded strokes are visible to it.
                 log.v("Force update, strokes to draw: ${page.strokes.size}")
                 page.drawAreaScreenCoordinates(Rect(0, 0, page.viewWidth, page.viewHeight))
-                launch(Dispatchers.Default) { refreshManager.refreshUiSuspend() }
+                launch(Dispatchers.Default) { drawCanvas.refreshUiSuspend() }
             }
         }
     }
@@ -127,7 +127,7 @@ class CanvasObserverRegistry(
         observerScope.launch(Dispatchers.Default) {
             CanvasEventBus.refreshUi.collect {
                 log.v("Refreshing UI!")
-                refreshManager.refreshUiSuspend()
+                drawCanvas.refreshUiSuspend()
             }
         }
     }
@@ -160,7 +160,7 @@ class CanvasObserverRegistry(
      */
     private fun redrawIfPenStaysOff() {
         if (viewModel.toolbarState.value.isDrawing) return
-        refreshManager.refreshUi(null)
+        drawCanvas.refreshUi(null)
     }
 
     private fun observeZoom() {
@@ -177,7 +177,7 @@ class CanvasObserverRegistry(
             CanvasEventBus.clearPageSignal.collect {
                 log.v("Clear page signal!")
                 cleanAllStrokes(page, history)
-                refreshManager.refreshUiSuspend()
+                drawCanvas.refreshUiSuspend()
             }
         }
     }
@@ -187,7 +187,7 @@ class CanvasObserverRegistry(
             CanvasEventBus.reinitSignal.collect {
                 log.v("Configuration changed!")
                 drawCanvas.attachRenderer()
-                refreshManager.refreshUi(null)
+                drawCanvas.refreshUi(null)
             }
         }
     }
@@ -196,7 +196,7 @@ class CanvasObserverRegistry(
         observerScope.launch {
             CanvasEventBus.reloadFromDb.collect {
                 page.refreshCurrentPage()
-                refreshManager.refreshUiSuspend()
+                drawCanvas.refreshUiSuspend()
             }
         }
     }
@@ -223,7 +223,7 @@ class CanvasObserverRegistry(
                 .collect { penSettings ->
                     log.v("pen settings change: $penSettings")
                     inputHandler.updatePenAndStroke()
-                    refreshManager.refreshUiSuspend()
+                    drawCanvas.refreshUiSuspend()
                 }
         }
         observerScope.launch {
@@ -235,7 +235,7 @@ class CanvasObserverRegistry(
                     log.v("eraser change: $eraser")
                     // The side-button eraser's track and the hand eraser's style both follow it.
                     inputHandler.configurePen()
-                    refreshManager.refreshUiSuspend()
+                    drawCanvas.refreshUiSuspend()
                 }
         }
     }
@@ -284,7 +284,7 @@ class CanvasObserverRegistry(
                 .collect { mode ->
                     log.v("mode change: $mode")
                     inputHandler.updatePenAndStroke()
-                    refreshManager.refreshUiSuspend()
+                    drawCanvas.refreshUiSuspend()
                 }
         }
     }
@@ -320,10 +320,38 @@ class CanvasObserverRegistry(
 
                 if (!CanvasEventBus.quickNav.isCurrent(scrub)) return@collectLatest
                 log.d("QuickNav preview: scrub=$scrub, page=$pageId, bitmap=${previewBitmap.hashCode()}")
-                refreshManager.showPreview(scrub, previewBitmap)
+                showPreview(scrub, previewBitmap)
             }
         }
     }
+
+    /**
+     * Shows QuickNav [scrub]'s [preview] over the whole surface until the scrub ends
+     * ([endPreview]). Dropped if that scrub is over by the time it reaches the main thread.
+     */
+    private fun showPreview(scrub: Int, preview: Bitmap) {
+        drawCanvas.post {
+            if (!CanvasEventBus.quickNav.isCurrent(scrub)) {
+                log.d("QuickNav preview of scrub $scrub dropped: the scrub is over")
+                return@post
+            }
+            if (drawCanvas.rawDrawing.showPreview(scrub, preview)) refreshWholeScreen()
+        }
+    }
+
+    /**
+     * QuickNav [scrub] ended: its preview (if it still owns the surface) gives way to the whole
+     * page. Once the controller accepts the end, a full panel refresh is requested, whether or not
+     * the page post succeeded (a retry posts it later).
+     */
+    private fun endPreview(scrub: Int) {
+        drawCanvas.post {
+            if (drawCanvas.rawDrawing.endPreview(scrub)) refreshWholeScreen()
+        }
+    }
+
+    private fun refreshWholeScreen() =
+        refreshScreenRegion(drawCanvas, Rect(0, 0, page.viewWidth, page.viewHeight))
 
     /**
      * A scrub's lifetime is its preview's: whichever way it ends (a page chosen, the same page,
@@ -337,7 +365,7 @@ class CanvasObserverRegistry(
                 current = scrub
                 if (ended != null) { // a StateFlow never repeats a value: this one ended
                     log.d("Scrub $ended ended")
-                    refreshManager.endPreview(ended)
+                    endPreview(ended)
                 }
             }
         }
