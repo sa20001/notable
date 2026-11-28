@@ -1,6 +1,7 @@
 package com.ethran.notable.editor.drawing
 
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.DashPathEffect
@@ -8,6 +9,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.Shader
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntOffset
 import com.ethran.notable.SCREEN_HEIGHT
@@ -39,13 +41,18 @@ private val defaultPaint = Paint().apply {
     this.strokeWidth = 1f
 }
 
-// The strips beside a sheet: white, dotted in grey.
-private const val SIDE_BAR_DOT_SPACING = 9
-private const val SIDE_BAR_DOT_RADIUS = 1.25f
+// The strips beside a sheet: white, dotted in grey on a grid fixed to the screen, so separately
+// drawn parts line up. One tile, repeated by the shader.
+private const val SIDE_BAR_DOT_SPACING = 18
 private val sideBarPaint = Paint().apply {
-    this.color = Color.rgb(120, 120, 120)
+    val tile = Bitmap.createBitmap(SIDE_BAR_DOT_SPACING, SIDE_BAR_DOT_SPACING, Bitmap.Config.ARGB_8888)
+    Canvas(tile).apply {
+        drawColor(Color.WHITE)
+        val centre = SIDE_BAR_DOT_SPACING / 2f
+        drawCircle(centre, centre, 1.25f, Paint().apply { color = Color.rgb(120, 120, 120) })
+    }
+    shader = BitmapShader(tile, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
 }
-private val sideBarBackgroundPaint = Paint().apply { this.color = Color.WHITE }
 
 // For drawing Hexagons
 private val defaultPaintStroke = defaultPaint.copy().apply { this.style = Paint.Style.STROKE }
@@ -380,16 +387,7 @@ fun drawBg(
  */
 fun drawBesideSheet(canvas: Canvas, area: Rect, barWidth: Int, viewWidth: Int) {
     for (bar in listOf(Rect(0, area.top, barWidth, area.bottom), Rect(viewWidth - barWidth, area.top, viewWidth, area.bottom))) {
-        if (!bar.intersect(area)) continue
-        canvas.drawRect(bar, sideBarBackgroundPaint)
-        // On a fixed grid, so the dots of separately drawn areas line up.
-        val firstX = bar.left + Math.floorMod(-bar.left, SIDE_BAR_DOT_SPACING)
-        val firstY = bar.top + Math.floorMod(-bar.top, SIDE_BAR_DOT_SPACING)
-        for (y in firstY until bar.bottom step SIDE_BAR_DOT_SPACING) {
-            for (x in firstX until bar.right step SIDE_BAR_DOT_SPACING) {
-                canvas.drawCircle(x.toFloat(), y.toFloat(), SIDE_BAR_DOT_RADIUS, sideBarPaint)
-            }
-        }
+        if (bar.intersect(area)) canvas.drawRect(bar, sideBarPaint)
     }
     for (x in listOf(barWidth, viewWidth - barWidth)) {
         if (x < area.left - 2 || x > area.right + 2) continue

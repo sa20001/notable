@@ -19,6 +19,7 @@ import com.ethran.notable.testing.testStroke
 import com.ethran.notable.utils.AppResult
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -182,6 +183,39 @@ class SheetViewportTest {
         val bar = (viewWidth - sheetWidth) / 2
         assertTrue("the stroke on the sheet is drawn", inkIn(page, bar, viewWidth - bar))
         assertFalse("the one beside it is not", inkIn(page, viewWidth - bar + 3, viewWidth))
+    }
+
+    /**
+     * The strips are fixed to the screen: after a scroll or a pinch, which move the screen bitmap,
+     * they look as a full redraw at the same viewport draws them.
+     */
+    @Test(timeout = 60_000)
+    fun theStrips_stayPut_throughAScrollAndAPinch() = runBlocking {
+        val viewWidth = A6_SHEET.width * 2
+        val page = open(A6_SHEET, viewWidth, 700)
+        val previousSettings = GlobalAppSettings.current
+        GlobalAppSettings.update(previousSettings.copy(continuousZoom = false))
+        try {
+            val steps = listOf<suspend () -> Unit>(
+                { page.updateScroll(page.currentPageId, Offset(0f, 4f)) },
+                { page.updateZoom(page.currentPageId, -0.5f, null) },
+            )
+            for (step in steps) {
+                onMain { step() }
+                val moved = leftStrip(page)
+                onMain { page.drawAreaScreenCoordinates(Rect(0, 0, viewWidth, 700)) }
+                assertArrayEquals("at zoom ${page.zoom}", leftStrip(page), moved)
+            }
+        } finally {
+            GlobalAppSettings.update(previousSettings)
+        }
+    }
+
+    /** The pixels of [page]'s left strip, short of the line at the sheet's edge. */
+    private fun leftStrip(page: PageView): IntArray {
+        val width = sideBarWidth(page.sheet, page.viewWidth, page.zoom) - 2
+        val bitmap = page.windowedBitmap
+        return IntArray(width * bitmap.height).also { bitmap.getPixels(it, 0, width, 0, 0, width, bitmap.height) }
     }
 
     /** Whether [page]'s screen has dark ink (not the strips' grey dots) between columns [from] and [until]. */

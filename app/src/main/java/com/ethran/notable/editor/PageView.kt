@@ -535,6 +535,7 @@ class PageView(
             canvas.restore()
         } else
             canvas.drawColor(Color.WHITE)
+        drawStrips(canvas, page.sheet, viewport.zoom)
         log.d("loaded initial bitmap from background, page: ${page.pageId}")
     }
 
@@ -581,6 +582,16 @@ class PageView(
             }
         }
         drawPageArea(activeCanvas, screenArea, ignoredStrokeIds, ignoredImageIds)
+    }
+
+    /**
+     * The strips beside a centred [sheet] at [zoom], over the whole of an unscaled [canvas] the
+     * view's size. They are fixed to the screen, so a screen bitmap moved by a scroll or zoom
+     * carries them out of place and they are painted again.
+     */
+    private fun drawStrips(canvas: Canvas, sheet: SheetSize?, zoom: Float) {
+        val bar = sideBarWidth(sheet, viewWidth, zoom)
+        if (bar > 0) drawBesideSheet(canvas, Rect(0, 0, viewWidth, viewHeight), bar, viewWidth)
     }
 
     private fun drawPageArea(
@@ -691,6 +702,7 @@ class PageView(
             width,
             height
         )
+        windowedCanvas.withScale(1f / start.zoom, 1f / start.zoom) { drawStrips(this, sheet, start.zoom) }
 
 //        persistBitmapDebounced()
     }
@@ -840,6 +852,7 @@ class PageView(
             floor(covered.bottom).toInt(),
         )
         redrawOutsideRect(coveredPixels, screenW, screenH)
+        windowedCanvas.withScale(1f / newZoom, 1f / newZoom) { drawStrips(this, sheet, newZoom) }
 
         log.i(
             "Zoom updated using snapshot scaling. zoom ${start.zoom} -> $newZoom, " +

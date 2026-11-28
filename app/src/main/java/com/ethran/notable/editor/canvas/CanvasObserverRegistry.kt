@@ -54,6 +54,9 @@ class CanvasObserverRegistry(
         // cancels the previous one, guaranteeing exactly one live observer set even if an old
         // DrawCanvas instance leaked.
         private var activeObserverJob: Job? = null
+
+        // How long the strips beside a sheet keep their width before the pen session follows.
+        private const val STRIP_SETTLE_MS = 150L
     }
 
     fun registerAll() {
@@ -164,6 +167,7 @@ class CanvasObserverRegistry(
         drawCanvas.refreshUi(null)
     }
 
+    @OptIn(FlowPreview::class)
     private fun observeZoom() {
         observerScope.launch {
             page.viewport.map { it.zoom }.distinctUntilChanged().drop(1).collect { zoom ->
@@ -172,10 +176,11 @@ class CanvasObserverRegistry(
             }
         }
         // The pen is blocked beside a centred sheet, and how wide that is follows the zoom and the
-        // shown page's sheet, so the session is rebuilt over the new area when it changes.
+        // shown page's sheet, so the session is rebuilt over the new area when it changes. Once it
+        // has settled: a pinch changes it at every step, and a rebuild takes tens of milliseconds.
         observerScope.launch {
             page.viewport.map { sideBarWidth(page.sheet, drawCanvas.width, it.zoom) }
-                .distinctUntilChanged().drop(1).collect { width ->
+                .distinctUntilChanged().drop(1).debounce(STRIP_SETTLE_MS).collect { width ->
                     log.v("side bars now $width px wide")
                     inputHandler.updateActiveSurface()
                 }
