@@ -250,6 +250,48 @@ class BackgroundFileChangeTest {
     }
 
     @Test(timeout = 30000)
+    fun borrowedScreenBitmap_goesBack_unlessABackgroundFileChangedMeanwhile() = runBlocking {
+        val pdf = File(dir, "background.pdf").also { writePdf(it, Color.RED) }
+        val pageId = createPage(notebookId = null, pdf, BackgroundType.Pdf(0))
+        pageDataManager.requestPageLoadJoin(pageId)
+        pageDataManager.onExit(pageId, createBitmap(10, 10), PageViewport())
+
+        // Taken by a view that then does not show it (a page change cancelled), and put back.
+        val toShow = checkNotNull(pageDataManager.takeBitmapToShow(pageId, PageViewport())) {
+            "on the shelf"
+        }
+        pageDataManager.putBack(pageId, toShow)
+        // Taken to write the preview while the file changes.
+        val toSave = checkNotNull(pageDataManager.takeBitmapToSave(pageId)) { "put back" }
+        assertEquals("the same bitmap went back", toShow.bitmap, toSave.bitmap)
+        pageDataManager.dropBackgroundsOf(setOf(pdf.path))
+        pageDataManager.putBack(pageId, toSave)
+
+        assertNull("may show the old file: not put back", pageDataManager.takeBitmapToSave(pageId))
+    }
+
+    @Test(timeout = 30000)
+    fun followedFileReplacedOnceDuringTheFirstLoad_isShown() = runBlocking {
+        // An image in a notebook following a PDF: watched like the PDF's pages. The file is a pipe
+        // at first, so that it is replaced while the first load reads it.
+        val image = File(dir, "background.png")
+        Os.mkfifo(image.path, "600".toInt(8))
+        val book = File(dir, "book.pdf").also { writePdf(it, Color.RED) }
+        val pageId = createPage(followingNotebook(book), image, BackgroundType.Image)
+        val loading = async(Dispatchers.IO) { pageDataManager.requestPageLoadJoin(pageId) }
+        // Opening the pipe for writing waits until the render has opened it for reading.
+        val old = FileOutputStream(image)
+        val next = File(dir, "background.png.part")
+        next.outputStream().use { solid(Color.BLUE).compress(Bitmap.CompressFormat.PNG, 100, it) }
+        assertTrue(next.renameTo(image))
+        old.use { solid(Color.RED).compress(Bitmap.CompressFormat.PNG, 100, it) }
+        loading.await()
+
+        // Only the watcher reports the replacement: nothing else is written or sent.
+        assertTrue("replacement shown", waitForCondition(10000) { shows(pageId, Color.BLUE) })
+    }
+
+    @Test(timeout = 30000)
     fun backgroundRenderedWhileItsFileChanges_showsTheFileAsItIsNow() = runBlocking {
         // The file is a pipe at first, so that it changes while the render reads it.
         val image = File(dir, "background.png")

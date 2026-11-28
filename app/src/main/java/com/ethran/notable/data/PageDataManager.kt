@@ -171,7 +171,6 @@ class PageDataManager @Inject constructor(
     private val backgroundFileWatcher: BackgroundFileWatcher,
 ) {
     val log = ShipBook.getLogger("PageDataManager")
-    private val dataScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
      * Single lock for all cached page state ([entries], [entriesTotalBytes], [backgroundCache],
@@ -644,13 +643,23 @@ class PageDataManager @Inject constructor(
             // Native backgrounds (dotted/lined/blank) have no bitmap to cache; record that so
             // ensureBackgroundLoaded doesn't keep trying to reload a nonexistent background.
             BackgroundType.Native -> {
-                synchronized(lock) { entries[pageId]?.backgroundIsNative = true }
+                synchronized(lock) {
+                    entries[pageId]?.apply {
+                        backgroundIsNative = true
+                        backgroundPath = null // it shows no file now
+                    }
+                }
                 return
             }
 
             BackgroundType.Image, ImageRepeating, CoverImage -> -1
         }
         synchronized(lock) { entries[pageId]?.backgroundIsNative = false }
+        // Watched before the file is read, so that a change during the render, or right after it,
+        // is reported and drops what was rendered. Blocking I/O, and outside the lock.
+        if (appRepository.isObservable(pageDataFromDb.notebookId)) {
+            backgroundFileWatcher.watch(pageId, background)
+        }
         // Cached before this returns, so a caller that awaited the load (requestPageLoadJoin) finds
         // it, and ensureBackgroundLoaded does not render it a second time.
         renderBackground(pageId, background, pageNumber, 1f)
@@ -873,16 +882,28 @@ class PageDataManager @Inject constructor(
     // bitmap someone else is reading.
 
     /**
-     * Takes [pageId]'s bitmap off the shelf, if it shows [viewport]. The caller owns it from then
-     * on; a view puts it back through [onExit].
+     * A screen bitmap taken off the shelf, showing [viewport]. It goes back with [putBack], or, once
+     * a view shows it, with [onExit].
      */
-    fun takeCachedBitmap(pageId: String, viewport: PageViewport): Bitmap? = synchronized(lock) {
-        val entry = entries[pageId] ?: return null
-        if (entry.bitmapViewport?.matches(viewport) != true) return null
-        val bitmap = entry.bitmap?.get()?.takeIf { !it.isRecycled && it.isMutable }
-        clearBitmapLocked(entry)
-        bitmap
-    }
+    internal data class BorrowedBitmap(
+        val bitmap: Bitmap,
+        val viewport: PageViewport,
+        /** [backgroundFileChanges] when it was taken: a later change means it may be stale. */
+        val backgroundFileChanges: Long,
+    )
+
+    /**
+     * Takes [pageId]'s bitmap off the shelf to draw into, if it shows [viewport]; the caller owns it
+     * from then on. Null if there is none.
+     */
+    internal fun takeBitmapToShow(pageId: String, viewport: PageViewport): BorrowedBitmap? =
+        synchronized(lock) {
+            val entry = entries[pageId] ?: return null
+            val shown = entry.bitmapViewport?.takeIf { it.matches(viewport) } ?: return null
+            val bitmap = entry.bitmap?.get()?.takeIf { !it.isRecycled && it.isMutable }
+            clearBitmapLocked(entry)
+            bitmap?.let { BorrowedBitmap(it, shown, backgroundFileChanges) }
+        }
 
     /** [pageId]'s bitmap on the shelf, with the viewport it shows, left there. For tests. */
     fun peekCachedBitmap(pageId: String): Pair<Bitmap, PageViewport>? = synchronized(lock) {
@@ -891,16 +912,9 @@ class PageDataManager @Inject constructor(
         bitmap to (entry.bitmapViewport ?: return null)
     }
 
-    /** A screen bitmap taken off the shelf to read, showing [viewport]; see [takeBitmapToSave]. */
-    internal data class BorrowedBitmap(
-        val bitmap: Bitmap,
-        val viewport: PageViewport,
-        val backgroundFileChanges: Long,
-    )
-
     /**
      * Takes [pageId]'s bitmap off the shelf, with the viewport it shows, to write its preview; the
-     * caller puts it back with [putBack]. Null if no bitmap is on the shelf.
+     * caller puts it back with [putBack]. Null if there is none.
      */
     internal fun takeBitmapToSave(pageId: String): BorrowedBitmap? = synchronized(lock) {
         val entry = entries[pageId] ?: return null
@@ -911,24 +925,15 @@ class PageDataManager @Inject constructor(
     }
 
     /**
-     * Puts back [borrowed] as [putBackBitmap] does, unless a background file changed since it was
-     * taken: then it may show the old file, and the page draws a new bitmap when next shown.
+     * Puts [borrowed] back on [pageId]'s shelf, unless a newer bitmap has been put there meanwhile,
+     * the page was dropped, or a background file changed since it was taken (then it may show the
+     * old file, and the page draws a new bitmap when next shown).
      */
     internal fun putBack(pageId: String, borrowed: BorrowedBitmap): Unit = synchronized(lock) {
         if (borrowed.backgroundFileChanges != backgroundFileChanges) return
         val entry = entries[pageId] ?: return
         if (entry.bitmap?.get() == null) shelveBitmapLocked(entry, borrowed.bitmap, borrowed.viewport)
     }
-
-    /**
-     * Puts back [bitmap], taken off [pageId]'s shelf and still showing [viewport], unless a newer
-     * bitmap has been put there meanwhile or the page was dropped.
-     */
-    fun putBackBitmap(pageId: String, bitmap: Bitmap, viewport: PageViewport): Unit =
-        synchronized(lock) {
-            val entry = entries[pageId] ?: return
-            if (entry.bitmap?.get() == null) shelveBitmapLocked(entry, bitmap, viewport)
-        }
 
     private fun shelveBitmapLocked(entry: PageCacheEntry, bitmap: Bitmap, viewport: PageViewport) {
         entry.bitmap = SoftReference(bitmap)
@@ -1125,12 +1130,13 @@ class PageDataManager @Inject constructor(
 
     /**
      * Renders page [pageNumber] of [path] (-1 for an image) at [scale] as the background of
-     * [pageId], and caches it and watches its file (see [linkBackground]). Caller must hold no lock.
+     * [pageId], and caches it (see [linkBackground]). Caller must hold no lock. The file is watched
+     * by then, if its page follows it: [preLoadBackground] starts that before the first render.
      *
      * A render during which a background file changed may show the file as it was, so it is not
      * cached but rendered again, [MAX_BACKGROUND_RENDERS] times at most. If files still change, the
-     * last render is returned uncached, and the page is marked as showing [path] and watches it, for
-     * the next change of it to find.
+     * last render is returned uncached, and the page is marked as showing [path], for the next
+     * change of it to find.
      */
     fun renderBackground(pageId: String, path: String, pageNumber: Int, scale: Float): Bitmap? {
         var renders = 0
@@ -1138,13 +1144,9 @@ class PageDataManager @Inject constructor(
             val fileChanges = synchronized(lock) { backgroundFileChanges }
             val background = CachedBackground(path, pageNumber, scale)
             log.d("Rendered background: $background")
-            if (linkBackground(pageId, background, fileChanges)) {
-                armBackgroundWatch(pageId, background)
-                return background.bitmap
-            }
+            if (linkBackground(pageId, background, fileChanges)) return background.bitmap
             if (++renders == MAX_BACKGROUND_RENDERS) {
                 synchronized(lock) { getOrCreateEntryLocked(pageId).backgroundPath = path }
-                armBackgroundWatch(pageId, background)
                 return background.bitmap
             }
         }
@@ -1183,19 +1185,6 @@ class PageDataManager @Inject constructor(
             // Keep the pool within its own budget line right after every addition.
             trimBackgroundsLocked()
             return true
-        }
-    }
-
-    /**
-     * Arm the inotify watch for [background] off the lock. Registering it stats the file and arms an
-     * inotify watch (blocking I/O), so it never runs with the drawing path blocked behind it, and it
-     * is deliberately not joined by the load — invalidation, not the initial render, needs it.
-     */
-    private fun armBackgroundWatch(pageId: String, background: CachedBackground) {
-        dataScope.launch {
-            val notebookId = appRepository.pageRepository.getById(pageId)?.notebookId
-            val observeBg = appRepository.isObservable(notebookId)
-            if (observeBg) backgroundFileWatcher.watch(pageId, background.path)
         }
     }
 
