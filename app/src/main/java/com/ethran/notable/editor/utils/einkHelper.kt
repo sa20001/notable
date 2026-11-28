@@ -14,6 +14,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.Velocity
 import com.ethran.notable.data.datastore.AppSettings
 import com.ethran.notable.data.datastore.GlobalAppSettings
@@ -24,6 +25,8 @@ import com.onyx.android.sdk.api.device.epd.UpdateOption
 import com.onyx.android.sdk.device.Device
 import com.onyx.android.sdk.utils.DeviceInfoUtil
 import io.shipbook.shipbooksdk.ShipBook
+import kotlin.math.max
+import kotlin.math.min
 
 private val log = ShipBook.getLogger("einkHelper")
 
@@ -81,22 +84,20 @@ fun onSurfaceChanged(view: View) {
 data class RawDrawingArea(val limit: Rect, val exclude: Rect)
 
 /**
- * Where raw drawing works on [view]: everything but the toolbar and the strips [stripWidth] wide
- * on each side of a centred sheet.
+ * Where raw drawing works on [view]: the [sheet] area (the whole view for an infinite page), but
+ * not the toolbar.
  */
-fun rawDrawingArea(view: View, toolbarHeight: Int, stripWidth: Int): RawDrawingArea {
+fun rawDrawingArea(view: View, toolbarHeight: Int, sheet: IntRect): RawDrawingArea {
     val viewWidth = view.width
     val viewHeight = view.height
-    val left = stripWidth
-    val right = viewWidth - stripWidth
     return if (GlobalAppSettings.current.toolbarPosition == AppSettings.Position.Top) {
         RawDrawingArea(
-            limit = Rect(left, toolbarHeight, right, viewHeight),
+            limit = Rect(sheet.left, max(sheet.top, toolbarHeight), sheet.right, sheet.bottom),
             exclude = Rect(0, 0, viewWidth, toolbarHeight),
         )
     } else {
         RawDrawingArea(
-            limit = Rect(left, 0, right, viewHeight - toolbarHeight),
+            limit = Rect(sheet.left, sheet.top, sheet.right, min(sheet.bottom, viewHeight - toolbarHeight)),
             exclude = Rect(0, viewHeight - toolbarHeight, viewWidth, viewHeight),
         )
     }

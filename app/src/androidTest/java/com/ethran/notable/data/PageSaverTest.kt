@@ -236,7 +236,7 @@ class PageSaverTest {
         suspend fun pageUpdatedAt(id: String) = data.db.pageDao().getById(id)!!.updatedAt
         suspend fun notebookUpdatedAt(id: String) = data.db.notebookDao().getById(id)!!.updatedAt
 
-        pageDataManager.recordScroll(pageId, IntOffset(120, 750))
+        pageDataManager.recordPosition(pageId, IntOffset(120, 750))
         assertEquals(AppResult.Success(Unit), pageSaver.saveAll())
         assertEquals(750, data.db.pageDao().getById(pageId)!!.positionY)
         assertEquals(120, data.db.pageDao().getById(pageId)!!.positionX)

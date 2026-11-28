@@ -107,7 +107,7 @@ class OnyxInputHandler(
         TouchHelperPenDevice(helper, drawCanvas, inputCallback) {
             val toolbarHeight = if (toolbarState.isToolbarOpen)
                 convertDpToPixel(40.dp, drawCanvas.context).toInt() else 0
-            rawDrawingArea(drawCanvas, toolbarHeight, page.stripWidth)
+            rawDrawingArea(drawCanvas, toolbarHeight, page.sheetArea)
         }
     }
 

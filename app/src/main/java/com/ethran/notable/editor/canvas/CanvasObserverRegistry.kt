@@ -5,7 +5,7 @@ import android.graphics.Rect
 import com.ethran.notable.editor.EditorViewModel
 import com.ethran.notable.editor.PageView
 import com.ethran.notable.editor.PageViewport
-import com.ethran.notable.editor.stripWidthFor
+import com.ethran.notable.editor.sheetAreaFor
 import com.ethran.notable.editor.state.History
 import com.ethran.notable.editor.state.Mode
 import com.ethran.notable.editor.utils.ImageHandler
@@ -55,7 +55,7 @@ class CanvasObserverRegistry(
         // DrawCanvas instance leaked.
         private var activeObserverJob: Job? = null
 
-        // How long the strips beside a sheet keep their width before the pen session follows.
+        // How long the sheet's area on the screen stays put before the pen session follows.
         private const val STRIP_SETTLE_MS = 150L
     }
 
@@ -175,13 +175,14 @@ class CanvasObserverRegistry(
                 inputHandler.updatePenAndStroke()
             }
         }
-        // The pen is blocked beside a centred sheet, and how wide that is follows the zoom and the
-        // shown page's sheet, so the session is rebuilt over the new area when it changes. Once it
-        // has settled: a pinch changes it at every step, and a rebuild takes tens of milliseconds.
+        // The pen works on the sheet only, and where that lies on the screen follows the viewport and
+        // the shown page's sheet, so the session is rebuilt over the new area when it changes. Once
+        // it has settled: a pan or pinch changes it at every step, and a rebuild takes tens of
+        // milliseconds.
         observerScope.launch {
-            page.viewport.map { stripWidthFor(page.sheet, page.viewWidth, it.zoom) }
-                .distinctUntilChanged().drop(1).debounce(STRIP_SETTLE_MS).collect { width ->
-                    log.v("strips now $width px wide")
+            page.viewport.map { sheetAreaFor(page.sheet, it, page.viewWidth, page.viewHeight) }
+                .distinctUntilChanged().drop(1).debounce(STRIP_SETTLE_MS).collect { area ->
+                    log.v("sheet now at $area on the screen")
                     inputHandler.updateActiveSurface()
                 }
         }

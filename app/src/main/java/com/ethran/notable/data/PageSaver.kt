@@ -168,7 +168,7 @@ class PageSaver @Inject constructor(
         if (removedImageIds.isNotEmpty()) appRepository.imageRepository.deleteAll(removedImageIds)
 
         // The page timestamp is the per-page dirty signal for incremental upload; the notebook
-        // timestamp drives the per-notebook sync Upload/Download decision. A scroll alone is saved
+        // timestamp drives the per-notebook sync Upload/Download decision. A position change alone is saved
         // below without them, so scrolling never makes sync upload a page. The page is stamped with
         // when it was last edited, so a preview captured after the last edit stays fresh, or past
         // a later time stamped meanwhile. The notebook is stamped with when it was saved, which
@@ -178,7 +178,7 @@ class PageSaver @Inject constructor(
             appRepository.pageRepository.touchUpdatedAt(pageId, changes.editedAtMs)
             appRepository.bookRepository.touchUpdatedAtForPage(pageId, Date())
         }
-        changes.scroll?.let { appRepository.pageRepository.updatePosition(pageId, it.x, it.y) }
+        changes.position?.let { appRepository.pageRepository.updatePosition(pageId, it.x, it.y) }
     }
 
     // On a read error assume the page exists, so its changes are kept and retried.

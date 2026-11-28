@@ -12,6 +12,7 @@ import android.graphics.RectF
 import android.graphics.Shader
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
 import com.ethran.notable.SCREEN_HEIGHT
 import com.ethran.notable.SCREEN_WIDTH
 import com.ethran.notable.data.datastore.GlobalAppSettings
@@ -265,11 +266,13 @@ fun drawBitmapToCanvas(
         ((scroll.y / scaleFactor) % imageHeight).coerceAtLeast(0f)
     )
     val rectOnImage = Rect(0, srcTop.y.toInt(), imageWidth, imageHeight)
+    // Below the top of the view when the page starts lower, as a sheet centred down the view does.
+    val topOnCanvas = (-scroll.y).coerceAtLeast(0f).toInt()
     val rectOnCanvas = Rect(
         -scroll.x.toInt(),
-        0,
+        topOnCanvas,
         widthOnCanvas - scroll.x.toInt(),
-        ((imageHeight - srcTop.y) * scaleFactor).toInt()
+        topOnCanvas + ((imageHeight - srcTop.y) * scaleFactor).toInt()
     )
 
     var filledHeight = 0
@@ -345,8 +348,7 @@ fun drawTemplate(
 
 /**
  * The background as the editor shows it: [drawTemplate], then what only the editor draws. A page
- * with a [sheet] gets the strips beside the sheet and a line at each multiple of its height. An
- * infinite page gets the margin and, if enabled, the breaks of a paginated PDF export.
+ * without a [sheet] gets the margin and, if enabled, the breaks of a paginated PDF export.
  */
 fun drawBg(
     canvas: Canvas,
@@ -365,9 +367,7 @@ fun drawBg(
         canvas.clipRect(scaleRect(it, scale))
     }
     drawTemplate(canvas, backgroundType, background, scroll, resourceBitmap, scale, repeat)
-    if (sheet != null) {
-        drawPageBreaks(canvas, scroll, scale, sheet.width.toFloat(), sheet.height.toFloat())
-    } else {
+    if (sheet == null) {
         drawMargin(canvas, scroll, scale)
         if (GlobalAppSettings.current.visualizePdfPagination) {
             // The pages of a paginated export: A4, as wide as the screen's short side.
@@ -381,17 +381,37 @@ fun drawBg(
 }
 
 /**
- * The view beside a centred sheet, in [area] (screen pixels, on an unscaled [canvas]): strips
- * [stripWidth] wide on each side of a view [viewWidth] wide, dotted, with a line at the sheet's edges.
- * Not page drawing: no page content shows there.
+ * The view around a sheet lying at [sheet] in a view [viewWidth] x [viewHeight], in [area] (screen
+ * pixels, on an unscaled [canvas]): dotted strips beside, above and below it, with a line along its
+ * edges. Not page drawing: no page content shows there.
  */
-fun drawStrips(canvas: Canvas, area: Rect, stripWidth: Int, viewWidth: Int) {
-    for (strip in listOf(Rect(0, area.top, stripWidth, area.bottom), Rect(viewWidth - stripWidth, area.top, viewWidth, area.bottom))) {
+fun drawStrips(canvas: Canvas, area: Rect, sheet: IntRect, viewWidth: Int, viewHeight: Int) {
+    val strips = listOf(
+        Rect(0, 0, sheet.left, viewHeight),
+        Rect(sheet.right, 0, viewWidth, viewHeight),
+        Rect(sheet.left, 0, sheet.right, sheet.top),
+        Rect(sheet.left, sheet.bottom, sheet.right, viewHeight),
+    )
+    for (strip in strips) {
         if (strip.intersect(area)) canvas.drawRect(strip, stripPaint)
     }
-    for (x in listOf(stripWidth, viewWidth - stripWidth)) {
-        if (x < area.left - 2 || x > area.right + 2) continue
-        canvas.drawLine(x.toFloat(), area.top.toFloat(), x.toFloat(), area.bottom.toFloat(), marginPaint)
+    // The edges that border a strip, where they pass through the area.
+    fun near(at: Int, from: Int, until: Int) = at >= from - 2 && at <= until + 2
+    val top = max(area.top, sheet.top).toFloat()
+    val bottom = min(area.bottom, sheet.bottom).toFloat()
+    if (top < bottom) {
+        for (x in listOf(sheet.left, sheet.right)) {
+            if (x in 1 until viewWidth && near(x, area.left, area.right))
+                canvas.drawLine(x.toFloat(), top, x.toFloat(), bottom, marginPaint)
+        }
+    }
+    val left = max(area.left, sheet.left).toFloat()
+    val right = min(area.right, sheet.right).toFloat()
+    if (left < right) {
+        for (y in listOf(sheet.top, sheet.bottom)) {
+            if (y in 1 until viewHeight && near(y, area.top, area.bottom))
+                canvas.drawLine(left, y.toFloat(), right, y.toFloat(), marginPaint)
+        }
     }
 }
 

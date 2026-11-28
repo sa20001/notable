@@ -25,7 +25,7 @@ import kotlin.math.max
 
 /**
  * Vertical scroll indicator (right side).
- * Uses the vertical scroll of [PageView.viewport] and [PageView.contentHeight].
+ * Uses the vertical scroll of [PageView.viewport] and the sheet's height, or [PageView.contentHeight] on a page without one.
  */
 @Composable
 fun ScrollIndicator(viewModel: EditorViewModel, page: PageView) {
@@ -40,14 +40,17 @@ fun ScrollIndicator(viewModel: EditorViewModel, page: PageView) {
         val viewportHeightPx = convertDpToPixel(this.maxHeight, LocalContext.current).toInt()
         val scrollY = viewport.scroll.y
 
-        // Total scrollable height approximation:
+        // A page with a sheet is the sheet, in page pixels. Otherwise an approximation:
         // contentHeight is the total content height (page coordinates)
         // scrollY + viewportHeightPx ensures indicator still shows while near bottom
-        val virtualHeight = max(contentHeight, scrollY.toInt() + viewportHeightPx)
-        if (virtualHeight <= viewportHeightPx) return@BoxWithConstraints
+        val sheet = page.sheet
+        val visibleHeight = if (sheet != null) viewportHeightPx / viewport.zoom else viewportHeightPx.toFloat()
+        val virtualHeight = sheet?.height?.toFloat()
+            ?: max(contentHeight, scrollY.toInt() + viewportHeightPx).toFloat()
+        if (virtualHeight <= visibleHeight) return@BoxWithConstraints
 
-        val indicatorSizeDp = (viewportHeightPx / virtualHeight.toFloat()) * this.maxHeight.value
-        val indicatorPositionDp = (scrollY / virtualHeight.toFloat()) * this.maxHeight.value
+        val indicatorSizeDp = (visibleHeight / virtualHeight) * this.maxHeight.value
+        val indicatorPositionDp = (scrollY / virtualHeight) * this.maxHeight.value
 
         if (!toolbarState.isToolbarOpen) return@BoxWithConstraints
 

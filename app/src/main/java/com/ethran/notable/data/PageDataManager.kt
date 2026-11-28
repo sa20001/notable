@@ -144,10 +144,10 @@ internal class PageChanges {
     val strokes = HashMap<String, Stroke?>()
     val images = HashMap<String, Image?>()
 
-    /** Scroll to persist, or null if unchanged. Not an edit: it doesn't advance edit timestamps. */
-    var scroll: IntOffset? = null
+    /** Position to persist, or null if unchanged. Not an edit: it doesn't advance edit timestamps. */
+    var position: IntOffset? = null
 
-    /** Whether strokes or images changed, not only the scroll. */
+    /** Whether strokes or images changed, not only the position. */
     val hasEdits: Boolean get() = strokes.isNotEmpty() || images.isNotEmpty()
 
     /** When strokes or images last changed, in epoch millis; 0 if they didn't. */
@@ -157,7 +157,7 @@ internal class PageChanges {
     fun putAll(newer: PageChanges) {
         strokes.putAll(newer.strokes)
         images.putAll(newer.images)
-        newer.scroll?.let { scroll = it }
+        newer.position?.let { position = it }
         editedAtMs = max(editedAtMs, newer.editedAtMs)
     }
 }
@@ -1008,10 +1008,10 @@ class PageDataManager @Inject constructor(
         entry.images = withRemoved(entry.images, imageIds, Image::id, changes.images)
     }
 
-    /** Records [scroll] as [pageId]'s scroll, both axes, to be saved. */
-    fun recordScroll(pageId: String, scroll: IntOffset) {
+    /** Records [position] as [pageId]'s position (the page point at the view's top-left), to be saved. */
+    fun recordPosition(pageId: String, position: IntOffset) {
         if (pageId.isEmpty()) return
-        synchronized(lock) { unsavedLocked(pageId).scroll = scroll }
+        synchronized(lock) { unsavedLocked(pageId).position = position }
         unsavedSignal.trySend(Unit)
     }
 

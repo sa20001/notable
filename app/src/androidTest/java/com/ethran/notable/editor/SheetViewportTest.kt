@@ -57,20 +57,21 @@ class SheetViewportTest {
         views.open(views.seedPage(sheet), viewWidth, viewHeight)
 
     @Test(timeout = 60_000)
-    fun aDrag_stopsAtTheSheetEdge() = runBlocking {
+    fun aDrag_stopsHalfAViewPastTheSheetEdge() = runBlocking {
         val sheetWidth = A5_SHEET.width
-        val page = open(A5_SHEET, viewWidth = sheetWidth / 2, viewHeight = 400)
+        val viewWidth = sheetWidth / 2
+        val page = open(A5_SHEET, viewWidth, viewHeight = 400)
         onMain { page.updateScroll(page.currentPageId, Offset(sheetWidth * 2f, 30f)) }
-        assertEquals(PageViewport(Offset((sheetWidth - sheetWidth / 2).toFloat(), 30f)), page.viewport.value)
+        assertEquals(PageViewport(Offset(sheetWidth - viewWidth / 2f, 30f)), page.viewport.value)
     }
 
     /**
      * A pinch reuses the screen bitmap: the reused pixels must land where the new viewport shows
-     * them, and what they leave uncovered must be drawn (an undrawn pixel shows as black). On a
-     * narrow sheet the scroll x is negative and re-centred at every zoom.
+     * them, and what they leave uncovered must be drawn (an undrawn pixel shows as black). The page
+     * point under the fingers stays under them, on a narrow sheet too, where the scroll is negative.
      */
     @Test(timeout = 60_000)
-    fun aPinchOnANarrowSheet_keepsItCentred_andTheScreenWhole() = runBlocking {
+    fun aPinchOnANarrowSheet_keepsThePointUnderTheFingers_andTheScreenWhole() = runBlocking {
         val sheetWidth = A6_SHEET.width.toFloat()
         val viewWidth = (sheetWidth * 2f).toInt()
         val viewHeight = (viewWidth * 0.6f).toInt()
@@ -81,9 +82,11 @@ class SheetViewportTest {
             // Off-centre, as fingers rarely pinch around the middle of the screen.
             val pivot = Offset(viewWidth * 0.7f, viewHeight * 0.4f)
             for ((delta, zoom) in listOf(-0.5f to 0.75f, 0.5f to 1f)) {
+                val underFingers = page.scroll + pivot / page.zoom
                 onMain { page.updateZoom(page.currentPageId, delta, pivot) }
                 assertEquals(zoom, page.zoom, 0.001f)
-                assertEquals("centred at $zoom", -(viewWidth / zoom - sheetWidth) / 2f, page.scroll.x, 0.01f)
+                assertEquals("x under the fingers at $zoom", underFingers.x, (page.scroll + pivot / zoom).x, 0.01f)
+                assertEquals("y under the fingers at $zoom", underFingers.y, (page.scroll + pivot / zoom).y, 0.01f)
                 assertEveryScreenPixelDrawn(page, "at zoom $zoom")
             }
         } finally {
@@ -143,23 +146,36 @@ class SheetViewportTest {
     }
 
     /**
-     * Page content shows on the sheet only. A stroke beside a centred sheet, moved there or written
-     * on another device, is kept in the page but not drawn over the strip.
+     * Page content shows on the sheet only. A stroke beside, above or below a sheet, moved there or
+     * written on another device, is kept in the page but not drawn over the strips.
      */
     @Test(timeout = 60_000)
-    fun aStrokeBesideTheSheet_isNotDrawnOverTheStrip() = runBlocking {
-        val sheetWidth = A6_SHEET.width
-        val pageId = views.seedPage(A6_SHEET)
+    fun aStrokeOffTheSheet_isNotDrawnOverTheStrips() = runBlocking {
+        val sheet = A6_SHEET
+        val pageId = views.seedPage(sheet)
         views.data.db.strokeDao().create(
-            listOf(testStroke(pageId, x = 100f, y = 100f), testStroke(pageId, x = sheetWidth + 50f, y = 100f)),
+            listOf(
+                testStroke(pageId, x = 100f, y = 100f),
+                testStroke(pageId, x = sheet.width + 50f, y = 100f),
+                testStroke(pageId, x = 100f, y = sheet.height + 50f),
+                testStroke(pageId, x = 100f, y = -50f),
+            ),
         )
-        val viewWidth = sheetWidth * 2
-        val page = views.open(pageId, viewWidth, 700)
-        onMain { page.drawAreaScreenCoordinates(Rect(0, 0, viewWidth, 700)) }
+        // Wider and taller than the sheet, so there are strips on every side of it.
+        val viewWidth = sheet.width * 2
+        val viewHeight = sheet.height + 150
+        val page = views.open(pageId, viewWidth, viewHeight)
+        onMain { page.drawAreaScreenCoordinates(Rect(0, 0, viewWidth, viewHeight)) }
 
-        val strip = page.stripWidth
-        assertTrue("the stroke on the sheet is drawn", inkIn(page, strip, viewWidth - strip))
-        assertFalse("the one beside it is not", inkIn(page, viewWidth - strip + 3, viewWidth))
+        // At zoom 1 the sheet is centred at its own size.
+        val left = (viewWidth - sheet.width) / 2
+        val right = left + sheet.width
+        val top = (viewHeight - sheet.height) / 2
+        val bottom = top + sheet.height
+        assertTrue("the stroke on the sheet is drawn", inkIn(page, Rect(left, top, right, bottom)))
+        assertFalse("the one beside it is not", inkIn(page, Rect(right + 3, 0, viewWidth, viewHeight)))
+        assertFalse("the one above it is not", inkIn(page, Rect(0, 0, viewWidth, top - 3)))
+        assertFalse("the one below it is not", inkIn(page, Rect(0, bottom + 3, viewWidth, viewHeight)))
     }
 
     /**
@@ -179,28 +195,35 @@ class SheetViewportTest {
             )
             for (step in steps) {
                 onMain { step() }
-                val moved = leftStrip(page)
+                val moved = offSheet(page)
                 onMain { page.drawAreaScreenCoordinates(Rect(0, 0, viewWidth, 700)) }
-                assertArrayEquals("at zoom ${page.zoom}", leftStrip(page), moved)
+                assertArrayEquals("at zoom ${page.zoom}", offSheet(page), moved)
             }
         } finally {
             GlobalAppSettings.update(previousSettings)
         }
     }
 
-    /** The pixels of [page]'s left strip, short of the line at the sheet's edge. */
-    private fun leftStrip(page: PageView): IntArray {
-        val width = page.stripWidth - 2
+    /** The pixels of [page]'s screen off the sheet: its left strip and the strips above and below, short of the edge lines. */
+    private fun offSheet(page: PageView): IntArray {
+        val area = page.sheetArea
         val bitmap = page.windowedBitmap
-        return IntArray(width * bitmap.height).also { bitmap.getPixels(it, 0, width, 0, 0, width, bitmap.height) }
+        val regions = listOf(
+            Rect(0, 0, area.left - 2, bitmap.height),
+            Rect(area.left, 0, area.right, area.top - 2),
+            Rect(area.left, area.bottom + 2, area.right, bitmap.height),
+        ).filter { it.width() > 0 && it.height() > 0 }
+        return regions.flatMap { r ->
+            IntArray(r.width() * r.height()).also { bitmap.getPixels(it, 0, r.width(), r.left, r.top, r.width(), r.height()) }.toList()
+        }.toIntArray()
     }
 
-    /** Whether [page]'s screen has dark ink (not the strips' grey dots) between columns [from] and [until]. */
-    private fun inkIn(page: PageView, from: Int, until: Int): Boolean {
+    /** Whether [page]'s screen has dark ink (not the strips' grey dots) in [area]. */
+    private fun inkIn(page: PageView, area: Rect): Boolean {
         val bitmap = page.windowedBitmap
-        val row = IntArray(until - from)
-        return (0 until bitmap.height).any { y ->
-            bitmap.getPixels(row, 0, row.size, from, y, row.size, 1)
+        val row = IntArray(area.width())
+        return (area.top until area.bottom).any { y ->
+            bitmap.getPixels(row, 0, row.size, area.left, y, row.size, 1)
             row.any { Color.red(it) < 60 && Color.green(it) < 60 && Color.blue(it) < 60 }
         }
     }
