@@ -148,6 +148,12 @@ fun PageHorizontalSliderWithReturn(
                         // this coroutine is cancelled (the scrubber leaves the screen, or a key
                         // changes), so the finally below ends it then.
                         var dragging = false
+                        // A drag that ends or is cancelled commits the page under the finger.
+                        val endDrag = {
+                            dragging = false
+                            isPressed = false
+                            onDragEnd(dragIndex)
+                        }
                         try {
                             detectDragGestures(
                                 onDragStart = { offset ->
@@ -160,16 +166,8 @@ fun PageHorizontalSliderWithReturn(
                                         onPreviewIndexChanged(newIndex)
                                     }
                                 },
-                                onDragEnd = {
-                                    dragging = false
-                                    isPressed = false
-                                    onDragEnd(dragIndex)
-                                },
-                                onDragCancel = {
-                                    dragging = false
-                                    isPressed = false
-                                    onDragEnd(dragIndex)
-                                }
+                                onDragEnd = endDrag,
+                                onDragCancel = endDrag
                             ) { change, _ ->
                                 change.consume()
                                 val currentX =

@@ -45,58 +45,67 @@ class SurfaceWriter(
     @MainThread
     fun write(dirtyRect: Rect?, bitmap: Bitmap?, force: Boolean): Boolean {
         checkMainThread("SurfaceWriter.write")
-        val zoneToRedraw = dirtyRect ?: Rect(0, 0, page.viewWidth, page.viewHeight)
+        val zone = dirtyRect ?: Rect(0, 0, page.viewWidth, page.viewHeight)
         val source = bitmap ?: page.windowedBitmap
         val start = SystemClock.uptimeMillis()
-        var canvas: Canvas? = null
-        // The requested content was drawn; it counts as shown only once the post succeeds too.
-        var drawn = false
-        var submitted = false
-        try {
-            log.v("Canvas refresh started, dirtyRect: $zoneToRedraw, bitmap: ${source.hashCode()}, force: $force")
-            canvas = drawCanvas.holder.lockCanvas(zoneToRedraw)
-            if (canvas == null) {
-                log.e(
-                    "FAILED to lock canvas (surface invalid/destroyed or locked by another " +
-                        "thread). page=${page.currentPageId}, dirtyRect=$zoneToRedraw, " +
-                        "surfaceValid=${drawCanvas.holder.surface?.isValid}"
-                )
-                return false
-            }
-            if (force) {
-                // enablePost(0)+enablePost(1) forces the bitmap through to the EPD even while the
-                // screen is frozen (a bare unlockCanvasAndPost is swallowed).
-                EpdController.enablePost(0)
-                EpdController.enablePost(1)
-            }
-            canvas.drawBitmap(source, zoneToRedraw, zoneToRedraw, bitmapPaint)
-            if (bitmap == null) drawPageCut(canvas)
-            // Debug mode: outline what this post covers, on the surface only (the page bitmap
-            // stays clean), so the outline lasts until that area is posted again.
-            if (GlobalAppSettings.current.debugMode) canvas.drawRect(zoneToRedraw, debugPostPaint)
-            drawn = true
-        } catch (e: RuntimeException) {
-            log.w("Surface released or invalid during draw", e)
-        } finally {
-            try {
-                // A locked canvas is always released, drawn or not.
-                if (canvas != null) {
-                    drawCanvas.holder.unlockCanvasAndPost(canvas)
-                    submitted = drawn
-                }
-                // Let the EPD apply the pushed region.
-                if (force) EpdController.resetViewUpdateMode(drawCanvas)
-                if (canvas != null) log.d(
-                    "write: page=${page.currentPageId}, rect=$zoneToRedraw, " +
-                        "bitmap=${source.hashCode()}, force=$force, submitted=$submitted, " +
-                        "took ${SystemClock.uptimeMillis() - start} ms"
-                )
-            } catch (e: IllegalStateException) {
-                log.w("Surface released during unlock", e)
-            }
+        val canvas = lock(zone) ?: return false
+        if (force) {
+            // enablePost(0)+enablePost(1) forces the bitmap through to the EPD even while the
+            // screen is frozen (a bare unlockCanvasAndPost is swallowed).
+            EpdController.enablePost(0)
+            EpdController.enablePost(1)
         }
+        val drawn = draw(canvas, zone, source, pageCut = bitmap == null)
+        val posted = post(canvas) // a locked canvas is always released, drawn or not
+        // Let the EPD apply the pushed region.
+        if (force) EpdController.resetViewUpdateMode(drawCanvas)
+        val submitted = drawn && posted
+        log.d(
+            "write: page=${page.currentPageId}, rect=$zone, bitmap=${source.hashCode()}, " +
+                "force=$force, submitted=$submitted, took ${SystemClock.uptimeMillis() - start} ms"
+        )
         return submitted
     }
+
+    /** Locks the surface over [zone]; null, logged, if it cannot be locked. */
+    private fun lock(zone: Rect): Canvas? {
+        val canvas = try {
+            drawCanvas.holder.lockCanvas(zone)
+        } catch (e: RuntimeException) {
+            log.e("FAILED to lock canvas: rect=$zone", e)
+            return null
+        }
+        if (canvas == null) log.e(
+            "FAILED to lock canvas (surface invalid/destroyed or locked by another thread). " +
+                "page=${page.currentPageId}, rect=$zone, " +
+                "surfaceValid=${drawCanvas.holder.surface?.isValid}"
+        )
+        return canvas
+    }
+
+    /** Draws [source] over [zone], plus the page-cut line if [pageCut]; false if it threw. */
+    private fun draw(canvas: Canvas, zone: Rect, source: Bitmap, pageCut: Boolean): Boolean =
+        try {
+            canvas.drawBitmap(source, zone, zone, bitmapPaint)
+            if (pageCut) drawPageCut(canvas)
+            // Debug mode: outline what this post covers, on the surface only (the page bitmap
+            // stays clean), so the outline lasts until that area is posted again.
+            if (GlobalAppSettings.current.debugMode) canvas.drawRect(zone, debugPostPaint)
+            true
+        } catch (e: RuntimeException) {
+            log.w("Surface released or invalid during draw", e)
+            false
+        }
+
+    /** Unlocks [canvas] and posts it; false if the surface was released meanwhile. */
+    private fun post(canvas: Canvas): Boolean =
+        try {
+            drawCanvas.holder.unlockCanvasAndPost(canvas)
+            true
+        } catch (e: IllegalStateException) {
+            log.w("Surface released during unlock", e)
+            false
+        }
 
     /** In Select mode, the selection's page-cut line, in screen coordinates. */
     private fun drawPageCut(canvas: Canvas) {

@@ -74,9 +74,6 @@ class RawDrawingController<P : Any>(
      */
     private var firmwareInk: ScreenArea? = null
 
-    /** An erase to commit; see [commitErase]. */
-    private var pendingErase: PendingErase? = null
-
     // --- Timing ---
 
     /** The pen stays off until this: a post or an erase commit is settling. */
@@ -88,9 +85,6 @@ class RawDrawingController<P : Any>(
     /** A write failed in the current pass: the surface is not taking posts, so no more tries. */
     private var failedThisPass = false
     private var cancelWake: (() -> Unit)? = null
-
-    /** When the scheduled wake fires ([MainTimer.nowMillis]); null: none. For the log. */
-    private var nextWake: Long? = null
 
     private val steps = mutableListOf<String>()
 
@@ -179,11 +173,11 @@ class RawDrawingController<P : Any>(
     fun commitErase(area: ScreenArea?, areaErase: Boolean) {
         checkThread()
         if (enabled) {
-            pendingErase = PendingErase(area, eraseSettleMillis(areaErase))
+            applyState("erase commit", PendingErase(area, eraseSettleMillis(areaErase)))
         } else {
             markPage(Stale.of(area))
+            applyState("erase commit")
         }
-        applyState("erase commit")
     }
 
     /**
@@ -208,27 +202,27 @@ class RawDrawingController<P : Any>(
      * pending erase, turns the pen off if a write needs it, writes what the surface lacks, turns
      * the pen back on if allowed. Then sets a timer for the next deadline (a hold ending, a retry).
      */
-    private fun applyState(trigger: String) {
+    private fun applyState(trigger: String, erase: PendingErase? = null) {
         cancelWake?.invoke()
         cancelWake = null
-        nextWake = null
         failedThisPass = false
+        var wake: Long? = null
         if (sessionOpen) {
-            pendingErase?.let { commitPendingErase(it) }
-            if (enabled && (!penAllowed() || pageStale != null)) {
-                // A write needs the pen off; if it is still allowed, it comes back after the post.
-                val back = penAllowed()
-                turnPenOff() // freezes, posts the whole page, exits raw drawing
-                if (back) holdPenFor(postSettleMillis())
+            erase?.let { commitPendingErase(it) }
+            if (enabled && !penAllowed()) turnPenOff()
+            if (enabled && pageStale != null) {
+                // A write under the pen: off for the post, back once it has settled.
+                turnPenOff()
+                holdPenFor(postSettleMillis())
             }
             writeContent()
             // The page is on the panel, or recovery gave up on it (the pen should not stay off).
             val pageReadyOrRetriesExhausted = pageStale == null || failures > RECOVERY_ATTEMPTS
             if (!enabled && penAllowed() && pageReadyOrRetriesExhausted) turnPenOn()
-            scheduleWake()
+            wake = scheduleWake()
         }
         if (steps.isNotEmpty()) {
-            log("$trigger: ${steps.joinToString("; ")} -> ${state()}")
+            log("$trigger: ${steps.joinToString("; ")} -> ${state(wake)}")
             steps.clear()
         }
     }
@@ -237,9 +231,8 @@ class RawDrawingController<P : Any>(
     private fun penAllowed() = preview == null && timer.nowMillis >= penOffUntil && drawingWanted()
 
     private fun commitPendingErase(erase: PendingErase) {
-        pendingErase = null
-        if (!enabled) return markPage(Stale.of(erase.area)) // the pen went off first: just show it
-        val area = firmwareInk?.let { ink -> erase.area?.union(ink) } ?: erase.area
+        // Exiting raw drawing clears the strokes only the firmware shows, so the push covers them.
+        val area = erase.area?.let { erased -> firmwareInk?.union(erased) ?: erased }
         pen.setInputEnabled(false)
         val pushed = write(area, null, force = true)
         if (!pushed) markPage(Stale.of(area))
@@ -284,7 +277,7 @@ class RawDrawingController<P : Any>(
         val current = preview
         if (current == null) {
             writePage()
-        } else if (!current.shown && !failedThisPass) {
+        } else if (!current.shown) {
             current.shown = write(null, current.bitmap, force = false)
             steps += "preview ${if (current.shown) "shown" else "FAILED"}"
         }
@@ -295,13 +288,13 @@ class RawDrawingController<P : Any>(
         val stale = pageStale ?: return
         if (failedThisPass) return
         // Read before the write, which resets it.
-        val recovering = failures > 0
+        val afterFailure = failures > 0
         if (!write(stale.area, null, force = false)) {
             steps += "page post FAILED ${stale.area ?: "whole"}"
             return
         }
         pageStale = null
-        if (recovering || timer.nowMillis < penOffUntil) holdPenFor(postSettleMillis())
+        if (afterFailure || timer.nowMillis < penOffUntil) holdPenFor(postSettleMillis())
         steps += "page posted ${stale.area ?: "whole"}"
     }
 
@@ -313,7 +306,6 @@ class RawDrawingController<P : Any>(
     /** A new surface (or none) shows nothing yet: the whole page, or the preview, is to write. */
     private fun newSurface() {
         preview?.shown = false
-        pendingErase = null
         firmwareInk = null
         failures = 0
         markPage(Stale.Whole)
@@ -335,22 +327,26 @@ class RawDrawingController<P : Any>(
         pageStale = pageStale with stale
     }
 
-    /** Wakes for the end of a hold, or to retry a failed write while recovery lasts. */
-    private fun scheduleWake() {
+    /**
+     * Wakes for the end of a hold, or to retry a failed write while recovery lasts. Returns when
+     * ([MainTimer.nowMillis]); null: no wake.
+     */
+    private fun scheduleWake(): Long? {
         val now = timer.nowMillis
         val lacking = pageStale != null || preview?.shown == false
-        val recovery = if (lacking && failures in 1..RECOVERY_ATTEMPTS) now + RECOVERY_MS else 0L
-        val next = listOf(penOffUntil, recovery).filter { it > now }.minOrNull()
-        nextWake = next
-        if (next == null) return
+        val holdEnd = penOffUntil.takeIf { it > now }
+        val retryAt = (now + RECOVERY_MS).takeIf { lacking && failures in 1..RECOVERY_ATTEMPTS }
+        val next = listOfNotNull(holdEnd, retryAt).minOrNull()
+        if (next == null) return null
         cancelWake = timer.schedule(next - now) {
             cancelWake = null
             applyState("timer")
         }
+        return next
     }
 
-    /** For the log: the pen's state, and why it is off (not wanted, a hold, a preview). */
-    private fun state(): String {
+    /** For the log: the pen's state, why it is off (not wanted, a hold, a preview), the [wake]. */
+    private fun state(wake: Long?): String {
         val now = timer.nowMillis
         val surface = when (preview?.shown) {
             null -> "page"
@@ -360,7 +356,7 @@ class RawDrawingController<P : Any>(
         return "pen=${if (enabled) "on" else "off"}, wanted=${drawingWanted()}, " +
             "hold=${max(0L, penOffUntil - now)} ms, open=$sessionOpen, surface=$surface, " +
             "page stale=${pageStale ?: "none"}, failures=$failures, " +
-            "wake=${nextWake?.let { "in ${it - now} ms" } ?: "none"}"
+            "wake=${wake?.let { "in ${it - now} ms" } ?: "none"}"
     }
 
     /** A preview on the surface, shown by [owner] (a QuickNav scrub). */
