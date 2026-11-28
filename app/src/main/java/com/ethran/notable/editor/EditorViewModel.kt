@@ -122,8 +122,9 @@ data class ToolbarUiState(
         (mode == Mode.Draw || mode == Mode.Line) && penPresetId == presetId
 
     /**
-     * Whether the pen draws (raw drawing on). Derived only, never stored: to change it,
-     * change one of its inputs, and the canvas follows the latest state.
+     * Whether the UI wants the pen to draw. The canvas's RawDrawingController turns raw drawing on
+     * only while this is true, but may keep it off longer (a post settling, a QuickNav preview).
+     * Derived only, never stored: to change it, change one of its inputs.
      */
     val isDrawing: Boolean
         get() = isResumed && hasWindowFocus &&
@@ -833,7 +834,8 @@ class EditorViewModel @Inject constructor(
             Log.d("EditorView", "Tried to change to same page!")
             val snack = SnackConf(text = "Tried to change to same page!", duration = 4000)
             snackDispatcher.showOrUpdateSnack(snack)
-            CanvasEventBus.restoreCanvas.emit(Unit)
+            // An ordinary redraw: it waits while a QuickNav preview owns the canvas.
+            CanvasEventBus.refreshUi.emit(Unit)
         }
     }
 

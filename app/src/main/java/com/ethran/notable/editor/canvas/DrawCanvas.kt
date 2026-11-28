@@ -2,6 +2,8 @@ package com.ethran.notable.editor.canvas
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Rect
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -11,13 +13,9 @@ import com.ethran.notable.editor.drawing.OpenGLRenderer
 import com.ethran.notable.editor.state.History
 import com.ethran.notable.editor.utils.DeviceCompat
 import com.ethran.notable.editor.utils.onSurfaceChanged
-import com.ethran.notable.editor.utils.onSurfaceDestroy
 import io.shipbook.shipbooksdk.ShipBook
 import kotlinx.coroutines.CoroutineScope
 
-
-// keep reference of the surface view presently associated to the singleton touchhelper
-var referencedSurfaceView: String = ""
 
 @SuppressLint("ViewConstructor") // we never execute constructor from XML
 class DrawCanvas(
@@ -49,14 +47,9 @@ class DrawCanvas(
             parent?.requestDisallowInterceptTouchEvent(true)
 
 
-            // NATIVE ERASER INDICATOR:
-            // On Onyx devices the eraser stroke is now rendered natively by the firmware
-            // (see einkHelper.setupSurface -> setEraserRawDrawingEnabled), so we no longer
-            // route erase touches into the OpenGL front-buffer renderer. Non-Onyx devices
-            // still use OpenGL as their only renderer. The original condition is kept
-            // (commented) as a reference. See docs/onyx-sdk/onyx-native-eraser-indicator.md.
-            // if (!DeviceCompat.isOnyxDevice || inputHandler.isErasing) {
-            if (!DeviceCompat.isOnyxDevice) {
+            // With an Onyx pen the firmware renders pen and eraser strokes; without one (another
+            // device, or TouchHelper failed to start) the OpenGL front-buffer renderer does.
+            if (inputHandler.pen == null) {
                 glRenderer.onTouchListener.onTouch(this, event)
             }
 
@@ -73,66 +66,94 @@ class DrawCanvas(
     }
 
     var glRenderer = OpenGLRenderer(this)
+        private set
 
     val inputHandler =
         OnyxInputHandler(this, page, viewModel, history, coroutineScope)
-    val refreshManager = CanvasRefreshManager(this, page, viewModel, inputHandler.touchHelper)
 
+    private val surfaceWriter = SurfaceWriter(this, page, viewModel)
+
+    /**
+     * The only owner of this surface's content and, with an Onyx pen, of raw drawing. Without
+     * one it drives [NoPenDevice] under the same surface rules.
+     */
+    val rawDrawing: RawDrawingController<Bitmap> = RawDrawingController(
+        pen = inputHandler.pen ?: NoPenDevice,
+        drawingWanted = { inputHandler.pen != null && viewModel.toolbarState.value.isDrawing },
+        configurePen = inputHandler::configurePen,
+        postToSurface = { area, preview, force -> surfaceWriter.write(area?.toRect(), preview, force) },
+        timer = ScopeMainTimer(coroutineScope),
+        postSettleMillis = DeviceCompat::postSettleMillis,
+        eraseSettleMillis = DeviceCompat::eraseSettleMillis,
+    )
 
     private val observers = CanvasObserverRegistry(
-        coroutineScope, this, page, viewModel, history, inputHandler, refreshManager
+        coroutineScope, this, page, viewModel, history, inputHandler
     )
 
     fun registerObservers() = observers.registerAll()
 
-    fun init() {
-        log.i("Initializing Canvas")
-        glRenderer = OpenGLRenderer(this@DrawCanvas)
-        glRenderer.attachSurfaceView(this)
-
-
-        val surfaceCallback: SurfaceHolder.Callback = object : SurfaceHolder.Callback {
-            override fun surfaceCreated(holder: SurfaceHolder) {
-                log.i("surface created $holder")
-                // set up the drawing surface
-                inputHandler.updateActiveSurface()
-                // The surface is only drawable once this callback fires; any
-                // refreshUi attempts before this silently no-op (lockCanvas
-                // returns null). Paint now so the newly-created surface
-                // isn't left blank.
-                this@DrawCanvas.post { refreshManager.refreshUi(null) }
-            }
-
-            override fun surfaceChanged(
-                holder: SurfaceHolder, format: Int, width: Int, height: Int
-            ) {
-                // Only act if actual dimensions changed
-                if (page.viewWidth == width && page.viewHeight == height) return
-
-                log.v("Surface dimension changed!")
-
-                // Update page dimensions, redraw and refresh
-                page.updateDimensions(width, height)
-                inputHandler.updateActiveSurface()
-                onSurfaceChanged(this@DrawCanvas)
-            }
-
-            override fun surfaceDestroyed(holder: SurfaceHolder) {
-                log.i(
-                    "surface destroyed ${
-                        this@DrawCanvas.hashCode()
-                    } - ref $referencedSurfaceView"
-                )
-                holder.removeCallback(this)
-                if (referencedSurfaceView == this@DrawCanvas.hashCode().toString()) {
-                    inputHandler.touchHelper?.closeRawDrawing()
-                }
-                onSurfaceDestroy(this@DrawCanvas, inputHandler.touchHelper)
-            }
-        }
-
-        this.holder.addCallback(surfaceCallback)
-
+    /**
+     * Shows [dirtyRect] of the page (screen coordinates; null: all of it) on this surface, from any
+     * thread, as soon as the page owns the surface ([RawDrawingController.showPage]). Only the
+     * page's surface: the Compose UI (toolbar, menus) is not touched.
+     */
+    fun refreshUi(dirtyRect: Rect?) {
+        log.d("refreshUi: scroll: ${page.scroll}, zoom: ${page.zoom}")
+        val area = dirtyRect?.toScreenArea()
+        post { rawDrawing.showPage(area) }
     }
 
+    /** [refreshUi] of the whole page, after the stroke being drawn (if any) is in the bitmap. */
+    suspend fun refreshUiSuspend() {
+        CanvasEventBus.waitForDrawing()
+        refreshUi(null)
+    }
+
+    /**
+     * Registered once, for the life of the view: Android destroys the surface when the app goes to
+     * the background and creates it again on this same view when it comes back.
+     */
+    private val surfaceCallback = object : SurfaceHolder.Callback {
+        override fun surfaceCreated(holder: SurfaceHolder) {
+            log.i("surface created $holder")
+            // A new session over the surface: it shows the whole page, then the pen comes on.
+            inputHandler.updateActiveSurface()
+        }
+
+        override fun surfaceChanged(
+            holder: SurfaceHolder, format: Int, width: Int, height: Int
+        ) {
+            // Only act if actual dimensions changed
+            if (page.viewWidth == width && page.viewHeight == height) return
+
+            log.v("Surface dimension changed!")
+
+            // Update page dimensions, redraw and refresh
+            page.updateDimensions(width, height)
+            inputHandler.updateActiveSurface()
+            onSurfaceChanged(this@DrawCanvas)
+        }
+
+        override fun surfaceDestroyed(holder: SurfaceHolder) {
+            log.i("surface destroyed ${this@DrawCanvas.hashCode()}")
+            // Closes the session of this canvas's own TouchHelper; surfaceCreated reopens it.
+            rawDrawing.closeSession()
+        }
+    }
+
+    init {
+        holder.addCallback(surfaceCallback)
+    }
+
+    /**
+     * (Re)creates the OpenGL front-buffer renderer on this view, releasing the previous one: when
+     * the view is created, and after the activity restarts.
+     */
+    fun attachRenderer() {
+        log.i("Attaching the OpenGL renderer")
+        glRenderer.release()
+        glRenderer = OpenGLRenderer(this)
+        glRenderer.attachSurfaceView(this)
+    }
 }
