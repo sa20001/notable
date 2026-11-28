@@ -4,6 +4,7 @@ import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.pdf.PdfDocument
+import android.system.Os
 import androidx.core.graphics.createBitmap
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -14,6 +15,7 @@ import com.ethran.notable.data.db.Page
 import com.ethran.notable.data.model.BackgroundType
 import com.ethran.notable.editor.PageLeases
 import com.ethran.notable.editor.PageView
+import com.ethran.notable.editor.PageViewport
 import com.ethran.notable.editor.canvas.CanvasEventBus
 import com.ethran.notable.testing.PageDataTestHarness
 import com.ethran.notable.testing.waitForCondition
@@ -22,12 +24,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -35,6 +38,8 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** A page's background follows its file: once the file is there, and after the file changes. */
@@ -62,8 +67,6 @@ class BackgroundFileChangeTest {
     @After
     fun tearDown() {
         viewScope.cancel()
-        // A background cached arms its file's watch in the background, reading the page record.
-        runBlocking { delay(500) }
         pageIds.forEach { data.backgroundFileWatcher.unwatch(it) }
         data.close()
         dir.deleteRecursively()
@@ -180,6 +183,175 @@ class BackgroundFileChangeTest {
         })
     }
 
+    @Test(timeout = 30000)
+    fun backgroundFileReplacedByRenamingANewOneOverIt_isStillFollowed() =
+        backgroundFileReplacedByRenaming_isStillFollowed(keepOldOpen = false)
+
+    // While the old file is open it isn't deleted, so its watch gets only ATTRIB for the rename:
+    // what shared storage (FUSE) reports on some devices, also once the file is closed.
+    @Test(timeout = 30000)
+    fun backgroundFileReplacedByRenamingWhileTheOldOneIsOpen_isStillFollowed() =
+        backgroundFileReplacedByRenaming_isStillFollowed(keepOldOpen = true)
+
+    /**
+     * A page following a file shows it after a new file is renamed over it, twice, as sync tools
+     * and atomic writers replace files; with the replaced files kept open if [keepOldOpen].
+     */
+    private fun backgroundFileReplacedByRenaming_isStillFollowed(keepOldOpen: Boolean) = runBlocking {
+        val pdf = File(dir, "background.pdf")
+        writePdf(pdf, Color.RED)
+        val pageId = createPage(followingNotebook(pdf), pdf, BackgroundType.Pdf(0))
+        assertTrue(shows(pageId, Color.RED))
+
+        val opened = mutableListOf<FileInputStream>()
+        fun replace(color: Int) {
+            if (keepOldOpen) opened += FileInputStream(pdf)
+            val next = File(dir, "background.pdf.part")
+            writePdf(next, color)
+            assertTrue(next.renameTo(pdf))
+        }
+        try {
+            assertTrue("replacement shown", waitForCondition(10000) {
+                replace(Color.BLUE)
+                waitForCondition(1000) { shows(pageId, Color.BLUE) }
+            })
+            assertTrue("later replacement shown", waitForCondition(10000) {
+                replace(Color.GREEN)
+                waitForCondition(1000) { shows(pageId, Color.GREEN) }
+            })
+        } finally {
+            opened.forEach { it.close() }
+        }
+    }
+
+    @Test(timeout = 30000)
+    fun changedFile_isDroppedFromThePagesShowingIt_andOnlyFromThem() = runBlocking {
+        val changed = File(dir, "changed.pdf").also { writePdf(it, Color.RED) }
+        val other = File(dir, "other.pdf").also { writePdf(it, Color.RED) }
+        val showingChanged = createPage(notebookId = null, changed, BackgroundType.Pdf(0))
+        val showingOther = createPage(notebookId = null, other, BackgroundType.Pdf(0))
+        for (pageId in listOf(showingChanged, showingOther)) {
+            pageDataManager.requestPageLoadJoin(pageId)
+            pageDataManager.onExit(pageId, createBitmap(10, 10), PageViewport())
+        }
+        pageDataManager.hold(showingOther)
+
+        val repaint = pageDataManager.dropBackgroundsOf(setOf(changed.path))
+
+        assertFalse("no repaint when no held page shows the file", repaint)
+        assertNull("background dropped", pageDataManager.getBackground(showingChanged).bitmap)
+        assertNull("screen bitmap dropped", pageDataManager.takeBitmapToSave(showingChanged))
+        assertNotNull("other background kept", pageDataManager.getBackground(showingOther).bitmap)
+        assertNotNull("other screen bitmap kept", pageDataManager.takeBitmapToSave(showingOther))
+        pageDataManager.release(showingOther)
+    }
+
+    @Test(timeout = 30000)
+    fun borrowedScreenBitmap_goesBack_unlessABackgroundFileChangedMeanwhile() = runBlocking {
+        val pdf = File(dir, "background.pdf").also { writePdf(it, Color.RED) }
+        val pageId = createPage(notebookId = null, pdf, BackgroundType.Pdf(0))
+        pageDataManager.requestPageLoadJoin(pageId)
+        pageDataManager.onExit(pageId, createBitmap(10, 10), PageViewport())
+
+        // Taken by a view that then does not show it (a page change cancelled), and put back.
+        val toShow = checkNotNull(pageDataManager.takeBitmapToShow(pageId, PageViewport())) {
+            "on the shelf"
+        }
+        pageDataManager.putBack(pageId, toShow)
+        // Taken to write the preview while the file changes.
+        val toSave = checkNotNull(pageDataManager.takeBitmapToSave(pageId)) { "put back" }
+        assertEquals("the same bitmap went back", toShow.bitmap, toSave.bitmap)
+        pageDataManager.dropBackgroundsOf(setOf(pdf.path))
+        pageDataManager.putBack(pageId, toSave)
+
+        assertNull("may show the old file: not put back", pageDataManager.takeBitmapToSave(pageId))
+    }
+
+    @Test(timeout = 30000)
+    fun followedFileReplacedOnceDuringTheFirstLoad_isShown() = runBlocking {
+        // An image in a notebook following a PDF: watched like the PDF's pages. The file is a pipe
+        // at first, so that it is replaced while the first load reads it.
+        val image = File(dir, "background.png")
+        Os.mkfifo(image.path, "600".toInt(8))
+        val book = File(dir, "book.pdf").also { writePdf(it, Color.RED) }
+        val pageId = createPage(followingNotebook(book), image, BackgroundType.Image)
+        val loading = async(Dispatchers.IO) { pageDataManager.requestPageLoadJoin(pageId) }
+        // Opening the pipe for writing waits until the render has opened it for reading.
+        val old = FileOutputStream(image)
+        val next = File(dir, "background.png.part")
+        next.outputStream().use { solid(Color.BLUE).compress(Bitmap.CompressFormat.PNG, 100, it) }
+        assertTrue(next.renameTo(image))
+        old.use { solid(Color.RED).compress(Bitmap.CompressFormat.PNG, 100, it) }
+        loading.await()
+
+        // Only the watcher reports the replacement: nothing else is written or sent.
+        assertTrue("replacement shown", waitForCondition(10000) { shows(pageId, Color.BLUE) })
+    }
+
+    @Test(timeout = 30000)
+    fun followedFileMissingAtTheLoad_isWatchedOnceRendered() = runBlocking {
+        val image = File(dir, "background.png")
+        val book = File(dir, "book.pdf").also { writePdf(it, Color.RED) }
+        val pageId = createPage(followingNotebook(book), image, BackgroundType.Image)
+        pageDataManager.requestPageLoadJoin(pageId)
+
+        // The file appears, and the page is drawn: rendered by the drawing path, not by a load.
+        writeImage(image, Color.RED)
+        pageDataManager.renderBackground(pageId, image.path, -1, 1f)
+        writeImage(image, Color.BLUE)
+
+        assertTrue("render dropped", waitForCondition(10000) { !hasBackground(pageId) })
+    }
+
+    @Test(timeout = 30000)
+    fun anotherFileRenderedForACachedPage_isWatched() = runBlocking {
+        val first = File(dir, "first.png").also { writeImage(it, Color.RED) }
+        val second = File(dir, "second.png").also { writeImage(it, Color.RED) }
+        val book = File(dir, "book.pdf").also { writePdf(it, Color.RED) }
+        val pageId = createPage(followingNotebook(book), first, BackgroundType.Image)
+        pageDataManager.requestPageLoadJoin(pageId)
+
+        // The page now shows another file; it stays cached, so it isn't loaded again.
+        pageDataManager.renderBackground(pageId, second.path, -1, 1f)
+        writeImage(second, Color.BLUE)
+
+        assertTrue("render dropped", waitForCondition(10000) { !hasBackground(pageId) })
+    }
+
+    @Test(timeout = 30000)
+    fun backgroundRenderedWhileItsFileChanges_showsTheFileAsItIsNow() = runBlocking {
+        // The file is a pipe at first, so that it changes while the render reads it.
+        val image = File(dir, "background.png")
+        Os.mkfifo(image.path, "600".toInt(8))
+        val rendering = async(Dispatchers.IO) { pageDataManager.renderBackground("page", image.path, -1, 1f) }
+        // Opening the pipe for writing waits until the render has opened it for reading.
+        val old = FileOutputStream(image)
+        val next = File(dir, "background.png.part")
+        next.outputStream().use { solid(Color.BLUE).compress(Bitmap.CompressFormat.PNG, 100, it) }
+        assertTrue(next.renameTo(image))
+        pageDataManager.dropBackgroundsOf(setOf(image.path))
+        old.use { solid(Color.RED).compress(Bitmap.CompressFormat.PNG, 100, it) }
+
+        assertEquals("returned", Color.BLUE, rendering.await()?.center())
+        assertEquals("cached", Color.BLUE, pageDataManager.getBackground("page").bitmap?.center())
+    }
+
+    @Test(timeout = 30000)
+    fun fileChangedAgainBeforeThePageRendersIt_isDroppedAndRepaintedAgain() = runBlocking {
+        val pdf = File(dir, "background.pdf").also { writePdf(it, Color.RED) }
+        val pageId = createPage(notebookId = null, pdf, BackgroundType.Pdf(0))
+        pageDataManager.requestPageLoadJoin(pageId)
+        pageDataManager.hold(pageId)
+        assertTrue(pageDataManager.dropBackgroundsOf(setOf(pdf.path)))
+
+        // Drawn again before a render of the new file is cached.
+        pageDataManager.onExit(pageId, createBitmap(10, 10), PageViewport())
+
+        assertTrue("repaint", pageDataManager.dropBackgroundsOf(setOf(pdf.path)))
+        assertNull("screen bitmap dropped", pageDataManager.takeBitmapToSave(pageId))
+        pageDataManager.release(pageId)
+    }
+
     /** Creates a notebook following [pdf]: the backgrounds of its pages are watched. */
     private suspend fun followingNotebook(pdf: File): String {
         val notebook = Notebook(
@@ -201,6 +373,13 @@ class BackgroundFileChangeTest {
         data.db.pageDao().create(page)
         pageIds += page.id
         return page.id
+    }
+
+    private fun hasBackground(pageId: String) = pageDataManager.getBackground(pageId).bitmap != null
+
+    /** Writes a [color] image to [file] in place. */
+    private fun writeImage(file: File, color: Int) {
+        file.outputStream().use { solid(color).compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
     private fun solid(color: Int): Bitmap = createBitmap(100, 100).apply { eraseColor(color) }

@@ -237,8 +237,7 @@ class PageView(
             withContext(Dispatchers.Main) { showPrepared(prepared) }
         } finally {
             // Not shown, as when the view was closed or its scope cancelled meanwhile.
-            if (prepared.fromShelf && !prepared.inView)
-                pageDataManager.putBackBitmap(pageId, prepared.bitmap, prepared.viewport)
+            if (!prepared.inView) prepared.shelved?.let { pageDataManager.putBack(pageId, it) }
         } ?: return false
         log.d("New bitmap hash: ${windowedBitmap.hashCode()}, ID: $pageId")
 
@@ -262,7 +261,8 @@ class PageView(
         val page: OpenPage,
         val viewport: PageViewport,
         val bitmap: Bitmap,
-        val fromShelf: Boolean,
+        /** The bitmap's loan from the shelf, if it came from there. */
+        val shelved: PageDataManager.BorrowedBitmap?,
     ) {
         @Volatile
         var inView = false
@@ -283,9 +283,9 @@ class PageView(
         val page = OpenPage.load(appRepository, pageId, record)
         if (synchronized(pageLock) { disposed }) return null
         val viewport = viewportToShow(page)
-        val shelved = pageDataManager.takeCachedBitmap(pageId, viewport)
-            ?.takeIf { it.width == viewWidth && it.height == viewHeight }
-        return PreparedPage(page, viewport, shelved ?: newBitmap(page, viewport), fromShelf = shelved != null)
+        val shelved = pageDataManager.takeBitmapToShow(pageId, viewport)
+            ?.takeIf { it.bitmap.width == viewWidth && it.bitmap.height == viewHeight }
+        return PreparedPage(page, viewport, shelved?.bitmap ?: newBitmap(page, viewport), shelved)
     }
 
     /** The viewport [page] had when this view left it, or else unzoomed at its saved scroll. */
