@@ -1,6 +1,7 @@
 package com.ethran.notable.editor
 
 import android.content.Context
+import android.graphics.Color
 import android.graphics.Matrix
 import androidx.compose.ui.geometry.Offset
 import androidx.test.core.app.ApplicationProvider
@@ -92,13 +93,13 @@ class EditorSimpleStateTests {
     }
 
     // ---------------------------------------------------------------------------
-    // PageView scroll / zoom regressions (branch betterLandScape)
+    // PageView scroll and zoom on pages with and without a sheet
     //
     // A view keeps one PageViewport — its scroll and its zoom — per page it shows, and it fits that
     // viewport to the page's sheet: centring the sheet when it is narrower than the view, and
-    // clamping it to the sheet when the view is. These tests therefore read the viewport the view
-    // shows (page.viewport, page.scroll, page.zoom) instead of the old zoomLevel flow and the
-    // setPageScroll calls, and run their steps on the main thread, where the editor runs them.
+    // clamping it to the sheet when the view is. These tests read the viewport the view shows
+    // (page.viewport, page.scroll, page.zoom), and run their steps on the main thread, where the
+    // editor runs them.
     // ---------------------------------------------------------------------------
 
     /**
@@ -117,9 +118,8 @@ class EditorSimpleStateTests {
             .also { fixtures += it }
 
     /**
-     * Regression 6050fdf2: for a fixed sheet (A4/A5/...) the drag delta used to be dropped
-     * (`deltaOutX = 0f`) whenever the drag stayed inside the sheet bounds, which locked horizontal
-     * panning completely. A drag that stays inside the bounds must move the view by that delta.
+     * On a sheet wider than the view, a drag that stays inside the sheet's bounds moves the view by
+     * that delta: horizontal panning is not locked.
      */
     @Test(timeout = 60_000)
     fun updateScroll_appliesHorizontalDelta_whenSheetIsWiderThanViewport() = runBlocking {
@@ -193,13 +193,9 @@ class EditorSimpleStateTests {
     }
 
     /**
-     * Regression from ff7c838f: the guard that kept scroll x off negative values
-     * (`if (start.scroll.x + delta.x < 0) delta.x = -start.scroll.x`) was unconditional, but the
-     * `fitScrollX` that replaced it hands a sheet-less page's scroll straight back, so a sideways
-     * drag walked the view past the page's left edge and into blank space.
-     *
      * An infinite canvas has no right bound — updateScroll must not clamp a delta there, which is
-     * what the test above pins — but it does have a left one: scroll x stops at 0.
+     * what the test above pins — but it does have a left one: scroll x stops at 0, so a sideways
+     * drag can't walk the view past the page's left edge into blank space.
      */
     @Test(timeout = 60_000)
     fun updateScroll_stopsAtTheLeftEdge_onAnInfinitePage() = runBlocking {
@@ -229,13 +225,9 @@ class EditorSimpleStateTests {
     }
 
     /**
-     * Companion of the drag regression, from 4105e071: the snapshot-scaling zoom used to end on
-     * `(start.scroll.x + deltaScrollPage.x).coerceAtLeast(0f)`, and routing that through fitScrollX
-     * dropped the floor for a sheet-less page too.
-     *
-     * Zooming out about a screen-centre pivot pulls the view's top left leftwards, and from a small
-     * scroll x that lands it off the page: the content that used to sit at x = 0 slides into blank
-     * space. The bound has to stop it at the edge.
+     * The zoom keeps the same left bound as the drag. Zooming out about a screen-centre pivot pulls
+     * the view's top left leftwards, and from a small scroll x that would land it off the page: the
+     * content at x = 0 would slide into blank space. The bound stops it at the edge.
      */
     @Test(timeout = 60_000)
     fun updateZoom_stopsAtTheLeftEdge_onAnInfinitePage() = runBlocking {
@@ -264,12 +256,68 @@ class EditorSimpleStateTests {
     }
 
     /**
-     * Regression 5982b107: resetting the view used to force `scroll.x = 0f`, which pinned a sheet
-     * narrower than the viewport to the left edge instead of centering it.
-     *
-     * The centering now happens when the page is shown (`viewportToShow`) as well as on a reset, and
-     * a sideways drag can no longer undo it — so the reset starts from a centered sheet and leaves it
-     * centered, with the vertical position it had.
+     * A pinch reuses the screen bitmap, so the reused pixels must land where the new viewport shows
+     * them, and everything they leave uncovered must be drawn. On a sheet narrower than the view the
+     * scroll x is negative and the fit re-centres it at every zoom; zooming out and back in must
+     * keep the sheet centred and leave no screen pixel undrawn (an undrawn pixel shows as black).
+     */
+    @Test(timeout = 60_000)
+    fun updateZoom_keepsTheScreenWholeAndTheSheetCentred_onANarrowSheet() = runBlocking {
+        val previousSettings = GlobalAppSettings.current
+        // Discrete zoom, so the pinch steps land on known zooms: SCREEN_WIDTH / SCREEN_HEIGHT and 1.
+        GlobalAppSettings.update(previousSettings.copy(continuousZoom = false))
+        try {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val sheetWidth = A6_SHEET.width.toFloat()
+            val viewWidth = (sheetWidth * 2f).toInt()
+            val viewHeight = (viewWidth * 0.6f).toInt()
+            val fixture = createPageView(
+                context = context,
+                sheet = A6_SHEET,
+                viewWidth = viewWidth,
+                viewHeight = viewHeight,
+            )
+            fixture.awaitInitialization()
+            // Off-centre, as fingers rarely pinch around the middle of the screen.
+            val pivot = Offset(viewWidth * 0.7f, viewHeight * 0.4f)
+
+            fixture.onMain { fixture.page.updateZoom(fixture.pageId, -0.5f, pivot) }
+            val zoomedOut = SCREEN_WIDTH.toFloat() / SCREEN_HEIGHT
+            assertEquals(zoomedOut, fixture.page.zoom, 0.001f)
+            assertEquals(
+                "centred after zooming out",
+                -((viewWidth / zoomedOut) - sheetWidth) / 2f, fixture.page.scroll.x, 0.01f,
+            )
+            assertEveryScreenPixelDrawn(fixture.page, "after zooming out")
+
+            fixture.onMain { fixture.page.updateZoom(fixture.pageId, 0.5f, pivot) }
+            assertEquals(1f, fixture.page.zoom, 0.001f)
+            assertEquals(
+                "centred after zooming back in",
+                -(viewWidth - sheetWidth) / 2f, fixture.page.scroll.x, 0.01f,
+            )
+            assertEveryScreenPixelDrawn(fixture.page, "after zooming back in")
+        } finally {
+            GlobalAppSettings.update(previousSettings)
+        }
+    }
+
+    /** Every redraw paints its area opaque, so a pixel that is not opaque was never drawn. */
+    private fun assertEveryScreenPixelDrawn(page: PageView, situation: String) {
+        val bitmap = page.windowedBitmap
+        val row = IntArray(bitmap.width)
+        for (y in 0 until bitmap.height) {
+            bitmap.getPixels(row, 0, bitmap.width, 0, y, bitmap.width, 1)
+            val x = row.indexOfFirst { Color.alpha(it) != 255 }
+            assertTrue("screen pixel ($x, $y) was never drawn $situation", x < 0)
+        }
+    }
+
+    /**
+     * Resetting the view keeps a sheet narrower than the viewport centred, rather than pinning it to
+     * the left edge. The sheet is centred when the page is shown (`viewportToShow`) and a sideways
+     * drag can't undo it, so the reset starts from a centred sheet and leaves it centred, with the
+     * vertical position it had.
      */
     @Test(timeout = 60_000)
     fun resetView_recentersNarrowSheetInsteadOfSnappingScrollToZero() = runBlocking {
@@ -491,14 +539,12 @@ class EditorSimpleStateTests {
     }
 
     /**
-     * Regression 99fc4fca: opening a page whose screen bitmap was still cached restored its zoom but
-     * left the scroll at (0, 0). A page's screen now sits on the page's shelf together with the
-     * viewport it shows, and a view opening that page takes it, at that viewport.
+     * A page's screen sits on the page's shelf together with the viewport it shows, and a view
+     * opening that page takes it, at that viewport: the saved scroll, not (0, 0).
      *
-     * The zoom half of that fix is gone by design: a page's zoom is kept in the views showing it,
-     * not in its record, while both of its scroll axes are saved — so a reopened page comes back
-     * unzoomed at the scroll it was left at. `PageViewportTest` covers that per-page viewport
-     * memory, so nothing here asserts a restored zoom any more.
+     * A page's zoom is kept in the views showing it, not in its record, while both of its scroll
+     * axes are saved, so a reopened page comes back unzoomed at the scroll it was left at.
+     * `PageViewportTest` covers the per-page viewport memory.
      */
     @Test(timeout = 60_000)
     fun reopeningAView_restoresSavedScroll_andReusesTheCachedScreen() = runBlocking {
@@ -535,10 +581,8 @@ class EditorSimpleStateTests {
     }
 
     /**
-     * Companion of the fix above: recreating the canvas re-applied the zoom to it. A zoom fitted to
-     * one viewport size fits no page at another, so a resize now drops it: the new screen is drawn
-     * unzoomed, and the sheet is fitted — centered again — in the new width.
-
+     * A zoom fitted to one viewport size fits no page at another, so a resize drops it: the new
+     * screen is drawn unzoomed, and the sheet is fitted — centred again — in the new width.
      */
     @Test(timeout = 60_000)
     fun updateDimensions_recreatesTheScreenUnzoomedAndRefitsTheSheet() = runBlocking {

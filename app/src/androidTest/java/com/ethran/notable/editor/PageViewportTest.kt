@@ -12,7 +12,6 @@ import com.ethran.notable.SCREEN_WIDTH
 import com.ethran.notable.editor.canvas.CanvasEventBus
 import com.ethran.notable.testing.PageDataTestHarness
 import com.ethran.notable.testing.TestNotebookSeeder
-import org.junit.Rule
 import com.ethran.notable.testing.movedDown
 import com.ethran.notable.testing.testImage
 import com.ethran.notable.testing.testStroke
@@ -47,7 +46,6 @@ import kotlin.math.roundToInt
  */
 @RunWith(AndroidJUnit4::class)
 class PageViewportTest {
-
 
     private val app: Application = ApplicationProvider.getApplicationContext()
     private lateinit var data: PageDataTestHarness

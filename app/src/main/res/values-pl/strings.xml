@@ -19,6 +19,7 @@
     <string name="continuous_zoom">Włącz płynne przybliżanie</string>
     <string name="continuous_stroke_slider">Płynny regulator grubości kreski</string>
     <string name="paginate_pdf">Podziel strony przy eksporcie</string>
+    <string name="preview_pdf_pagination">Podgląd podziału stron</string>
 
     <string name="app_new_version">Wygląda na to, że nowa wersja Notable jest dostępna na GitHubie!</string>
     <string name="app_see_release">Zobacz wersję w przeglądarce</string>
@@ -259,5 +260,16 @@
     <string name="toolbar_element_home">Biblioteka</string>
     <string name="toolbar_element_menu">Menu</string>
     <string name="toolbar_element_divider">Separator</string>
+    <string name="details_notebook_pageMode">Rodzaj strony</string>
+    <string name="details_notebook_sheet">Strona: %1$s (%2$d × %3$d px)</string>
+    <string name="page_mode_infinite">Nieskończone płótno</string>
+    <string name="page_mode_a4">A4</string>
+    <string name="page_mode_letter">Letter</string>
+    <string name="page_mode_legal">Legal</string>
+    <string name="default_page_mode">Domyślny rodzaj strony</string>
+    <string name="page_mode_tabloid">Tabloid</string>
+    <string name="page_orientation">Orientacja</string>
+    <string name="page_orientation_portrait">Pionowa</string>
+    <string name="page_orientation_landscape">Pozioma</string>
 
 </resources>

@@ -21,6 +21,7 @@ import com.ethran.notable.editor.utils.handleScribbleToErase
 import com.ethran.notable.editor.utils.handleSelect
 import com.ethran.notable.editor.utils.onSurfaceInit
 import com.ethran.notable.editor.utils.penToStroke
+import com.ethran.notable.editor.sideBarWidth
 import com.ethran.notable.editor.utils.rawDrawingArea
 import com.ethran.notable.editor.utils.transformToLine
 import com.ethran.notable.ui.convertDpToPixel
@@ -107,7 +108,7 @@ class OnyxInputHandler(
         TouchHelperPenDevice(helper, drawCanvas, inputCallback) {
             val toolbarHeight = if (toolbarState.isToolbarOpen)
                 convertDpToPixel(40.dp, drawCanvas.context).toInt() else 0
-            rawDrawingArea(drawCanvas, toolbarHeight)
+            rawDrawingArea(drawCanvas, toolbarHeight, sideBarWidth(page.sheet, drawCanvas.width, page.zoom))
         }
     }
 

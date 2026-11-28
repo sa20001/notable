@@ -13,10 +13,11 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.core.graphics.withScale
 import com.ethran.notable.SCREEN_HEIGHT
 import com.ethran.notable.SCREEN_WIDTH
-import com.ethran.notable.data.model.SheetSize
+import com.ethran.notable.data.datastore.GlobalAppSettings
 import com.ethran.notable.data.model.BackgroundType
+import com.ethran.notable.data.model.SheetSize
+import com.ethran.notable.editor.sideBarWidth
 import com.ethran.notable.editor.utils.scaleRect
-import com.ethran.notable.ui.sideBarsRectangles
 import com.onyx.android.sdk.extension.copy
 import io.shipbook.shipbooksdk.ShipBook
 import kotlin.math.cos
@@ -40,20 +41,29 @@ private val defaultPaint = Paint().apply {
     this.strokeWidth = 1f
 }
 
+// The strips beside a sheet: white, dotted in grey.
+private const val SIDE_BAR_DOT_SPACING = 9
+private const val SIDE_BAR_DOT_RADIUS = 1.25f
 private val sideBarPaint = Paint().apply {
     this.color = Color.rgb(120, 120, 120)
 }
+private val sideBarBackgroundPaint = Paint().apply { this.color = Color.WHITE }
 
 // For drawing Hexagons
 private val defaultPaintStroke = defaultPaint.copy().apply { this.style = Paint.Style.STROKE }
 private val marginPaint = Paint().apply {
     this.color = Color.MAGENTA
-    this.strokeWidth = 2.5f
+    this.strokeWidth = 2f
 }
 private val paginationLinePaint = Paint().apply {
     color = Color.RED
     strokeWidth = 4f
     pathEffect = DashPathEffect(floatArrayOf(10f, 5f), 0f)
+}
+private val pageLabelPaint = Paint().apply {
+    color = Color.BLACK
+    textSize = 24f
+    isAntiAlias = true
 }
 
 fun drawLinedBg(canvas: Canvas, scroll: Offset, scale: Float) {
@@ -84,6 +94,7 @@ fun drawDottedBg(canvas: Canvas, scroll: Offset, scale: Float) {
     val width = (canvas.width / scale).toInt()
     // white bg
     canvas.drawColor(Color.WHITE)
+
 
     // dots
     val offset = IntOffset(lineHeight, lineHeight) - IntOffset(
@@ -280,23 +291,19 @@ fun drawBitmapToCanvas(
     }
 }
 
-fun drawBg(
+/**
+ * The page's template or background image, as an export or a preview shows it. The canvas is
+ * scaled by [scale], so its own width and height are in screen pixels.
+ */
+fun drawTemplate(
     canvas: Canvas,
     backgroundType: BackgroundType,
     background: String,
-    sheet: SheetSize?,
     scroll: Offset = Offset.Zero,
     resourceBitmap: Bitmap?,
-    scale: Float = 1f,          // When exporting, we change scale of canvas. therefore canvas.width/height is scaled
+    scale: Float = 1f,
     repeat: Boolean = false,    // for repeating image
-    clipRect: Rect? = null,     // before the scaling
 ) {
-
-    log.v("Loading the background")
-    clipRect?.let {
-        canvas.save()
-        canvas.clipRect(scaleRect(it, scale))
-    }
     when (backgroundType) {
         // draw native background for it we don't need a resource
         is BackgroundType.Native -> {
@@ -315,10 +322,6 @@ fun drawBg(
                     )
                 }
             }
-            // Calculate the size of the sidebar rectangles and apply the dot pattern
-            for (rect in sideBarsRectangles(sheet, canvas.width, canvas.height, scale)) {
-                drawDotPattern(canvas, rect, scale)
-            }
         }
 
         else -> {
@@ -333,70 +336,66 @@ fun drawBg(
             }
         }
     }
-    if (sheet == null) {
-        drawMargin(canvas, scroll, scale) // TODO investigate if still useful
+}
+
+/**
+ * The background as the editor shows it: [drawTemplate], then what only the editor draws. A page
+ * with a [sheet] gets the strips beside the sheet and a line at each multiple of its height. An
+ * infinite page gets the margin and, if enabled, the breaks of a paginated PDF export.
+ */
+fun drawBg(
+    canvas: Canvas,
+    backgroundType: BackgroundType,
+    background: String,
+    sheet: SheetSize?,
+    scroll: Offset = Offset.Zero,
+    resourceBitmap: Bitmap?,
+    scale: Float = 1f,
+    repeat: Boolean = false,    // for repeating image
+    clipRect: Rect? = null,     // before the scaling
+) {
+    log.v("Loading the background")
+    clipRect?.let {
+        canvas.save()
+        canvas.clipRect(scaleRect(it, scale))
     }
-
-    // Draw the page line if using a page with defined size
-    drawPaginationLine(canvas, scroll, scale, sheet)
-
+    drawTemplate(canvas, backgroundType, background, scroll, resourceBitmap, scale, repeat)
+    if (sheet != null) {
+        drawSideBars(canvas, sideBarWidth(sheet, canvas.width, scale), scale)
+        drawPageBreaks(canvas, scroll, scale, sheet.width.toFloat(), sheet.height.toFloat())
+    } else {
+        drawMargin(canvas, scroll, scale)
+        if (GlobalAppSettings.current.visualizePdfPagination) {
+            // The pages of a paginated export: A4, as wide as the screen's short side.
+            val width = min(SCREEN_HEIGHT, SCREEN_WIDTH).toFloat()
+            drawPageBreaks(canvas, scroll, scale, width, width * 297f / 210f)
+        }
+    }
     if (clipRect != null) {
         canvas.restore()
     }
 }
 
-fun drawDotPattern(canvas: Canvas, rect: Rect, scale: Float) {
-
-    canvas.withScale( // Use no scale to apply the dow pattern
-        1f / scale, 1f / scale
-    ) {
-
-
-        // Background
-        /*
-         * TODO: Remove when/if the background rendering is overhauled.
-         * Ideally, background drawing functions should be constrained to the sheet bounds
-         * instead of drawing across the entire canvas, eliminating the need to cover
-         * the areas outside the sheet with white rectangles.
-         *
-         * For now, they draw across the entire canvas, so the white rectangles are necessary.
-         */
-        canvas.drawRect(
-            rect.left.toFloat(),
-            rect.top.toFloat(),
-            rect.right.toFloat(),
-            rect.bottom.toFloat(),
-            Paint().apply { color = Color.WHITE }
-        )
-
-        val spacing = 9
-        val radius = 1.25f
-
-        for (y in rect.top until rect.bottom step spacing) {
-            for (x in rect.left until rect.right step spacing) {
-                canvas.drawCircle(
-                    x.toFloat(),
-                    y.toFloat(),
-                    radius,
-                    sideBarPaint
-                )
+/** Covers the strips [barWidth] screen pixels wide on each side of a centred sheet. */
+private fun drawSideBars(canvas: Canvas, barWidth: Int, scale: Float) {
+    if (barWidth <= 0) return
+    canvas.withScale(1f / scale, 1f / scale) {
+        val width = canvas.width
+        val height = canvas.height
+        for (bar in listOf(Rect(0, 0, barWidth, height), Rect(width - barWidth, 0, width, height))) {
+            canvas.drawRect(bar, sideBarBackgroundPaint)
+            for (y in bar.top until bar.bottom step SIDE_BAR_DOT_SPACING) {
+                for (x in bar.left until bar.right step SIDE_BAR_DOT_SPACING) {
+                    canvas.drawCircle(x.toFloat(), y.toFloat(), SIDE_BAR_DOT_RADIUS, sideBarPaint)
+                }
             }
         }
-
-        var startX = 0f
-        startX = if (rect.left == 0) { // if left rectangle
-            rect.right.toFloat()
-        } else{ // if right rectangle
-            rect.left.toFloat()
+        // The sheet's edges.
+        for (x in listOf(barWidth, width - barWidth)) {
+            canvas.drawLine(
+                x.toFloat(), padding.toFloat(), x.toFloat(), (height - padding).toFloat(), marginPaint
+            )
         }
-
-        canvas.drawLine(
-            startX,
-            padding.toFloat(),
-            startX,
-            (canvas.height - padding).toFloat(),
-            marginPaint
-        )
     }
 }
 
@@ -412,58 +411,22 @@ fun drawMargin(canvas: Canvas, scroll: Offset, scale: Float) {
     }
 }
 
-fun drawPaginationLine(
+/** A labelled line every [pageHeight] page pixels down, [pageWidth] long from the page's left edge. */
+private fun drawPageBreaks(
     canvas: Canvas,
     scroll: Offset,
     scale: Float,
-    sheet: SheetSize?
+    pageWidth: Float,
+    pageHeight: Float,
 ) {
-    val textPaint = Paint().apply {
-        color = Color.BLACK
-        textSize = 24f
-        isAntiAlias = true
-    }
-    if (sheet == null) return
-
-    val sheetHeightPixels = sheet.height.toFloat()
-    val sheetWidth = sheet.width.toFloat()
-
-
-    // Convert scroll position to canvas coordinates
-    // Calculate current page number (1-based)
-    val currentPage = floor(scroll.y / sheetHeightPixels).toInt() + 1
-
-    // Calculate position of first page break
-    var yPos = (currentPage * sheetHeightPixels) - scroll.y
-
-    val residualScrollX = scroll.x
-    val startX = -residualScrollX
-    val stopX = -residualScrollX + sheetWidth
-    log.d(
-        """
-    Sheet width $sheetWidth, scrollX $residualScrollX
-    StartX $startX, stopX $stopX
-    """.trimIndent()
-    )
-
-    var pageNum = currentPage
+    if (pageHeight <= 0f) return
+    // The first break below the top of the view, counted from 1.
+    var pageNum = floor(scroll.y / pageHeight).toInt() + 1
+    var yPos = pageNum * pageHeight - scroll.y
     while (yPos < canvas.height / scale) {
-        canvas.drawLine(
-            startX,
-            yPos,
-            stopX,
-            yPos,
-            paginationLinePaint
-        )
-
-        canvas.drawText(
-            "Subpage ${pageNum + 1}",
-            20f - residualScrollX,
-            yPos + 30f,
-            textPaint
-        )
-
-        yPos += sheetHeightPixels
+        canvas.drawLine(-scroll.x, yPos, pageWidth - scroll.x, yPos, paginationLinePaint)
+        canvas.drawText("Subpage ${pageNum + 1}", 20f - scroll.x, yPos + 30f, pageLabelPaint)
+        yPos += pageHeight
         pageNum++
     }
 }

@@ -5,6 +5,7 @@ import android.graphics.Rect
 import com.ethran.notable.editor.EditorViewModel
 import com.ethran.notable.editor.PageView
 import com.ethran.notable.editor.PageViewport
+import com.ethran.notable.editor.sideBarWidth
 import com.ethran.notable.editor.state.History
 import com.ethran.notable.editor.state.Mode
 import com.ethran.notable.editor.utils.ImageHandler
@@ -167,10 +168,17 @@ class CanvasObserverRegistry(
         observerScope.launch {
             page.viewport.map { it.zoom }.distinctUntilChanged().drop(1).collect { zoom ->
                 log.v("zoom level change: $zoom")
-                // The writeable area depends on the zoom, so the surface follows it.
-                inputHandler.updateActiveSurface()
                 inputHandler.updatePenAndStroke()
             }
+        }
+        // The pen is blocked beside a centred sheet, and how wide that is follows the zoom and the
+        // shown page's sheet, so the session is rebuilt over the new area when it changes.
+        observerScope.launch {
+            page.viewport.map { sideBarWidth(page.sheet, drawCanvas.width, it.zoom) }
+                .distinctUntilChanged().drop(1).collect { width ->
+                    log.v("side bars now $width px wide")
+                    inputHandler.updateActiveSurface()
+                }
         }
     }
 
